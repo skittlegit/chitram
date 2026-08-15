@@ -1,13 +1,14 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ALL_MOVIES, DECADES, GAME_TYPES, MOVIES, gameConfig, movieLane, movieTitleWords, type Decade, type GameType, type Movie } from "./game-data";
 
 type Mode = "daily" | "practice" | "archive";
 type Result = "match" | "close" | "miss";
 type Era = Decade | "All";
 type ClueField = "year" | "genres" | "director" | "hero" | "lane";
+type GameSelection = { decade?: Era; gameType?: GameType; mode?: Mode; archiveOffset?: number };
 
 const ERAS: Era[] = ["All", ...DECADES];
 const MAX_PAID_HINTS = 3;
@@ -166,9 +167,21 @@ function MoviePoster({ movie, className = "" }: { movie: Movie; className?: stri
   );
 }
 
+function NextMovieCountdown() {
+  const [countdown, setCountdown] = useState("");
+
+  useEffect(() => {
+    const update = () => setCountdown(nextPuzzleCountdown());
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return <strong>{countdown || "Midnight IST"}</strong>;
+}
+
 export default function GameExperience({ initialDate }: { initialDate: string }) {
   const [currentDate, setCurrentDate] = useState(initialDate);
-  const [countdown, setCountdown] = useState("");
   const [decade, setDecade] = useState<Era>("All");
   const [gameType, setGameType] = useState<GameType>("classic");
   const [mode, setMode] = useState<Mode>("daily");
@@ -177,19 +190,52 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   const [query, setQuery] = useState("");
   const [guesses, setGuesses] = useState<Movie[]>([]);
   const [status, setStatus] = useState<"playing" | "won" | "lost">("playing");
-  const [highlight, setHighlight] = useState(0);
+  const [highlight, setHighlight] = useState(-1);
   const [hintsUsed, setHintsUsed] = useState(0);
   const [finalScore, setFinalScore] = useState(0);
   const [toast, setToast] = useState("");
+  const [undoMovie, setUndoMovie] = useState<Movie | null>(null);
+  const [pendingGame, setPendingGame] = useState<GameSelection | null>(null);
+  const [activeSection, setActiveSection] = useState("top");
+  const resultRef = useRef<HTMLDivElement>(null);
   const player = useSyncExternalStore(subscribeToPlayer, getPlayerSnapshot, () => DEFAULT_PLAYER);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      setCountdown(nextPuzzleCountdown());
+    const updateDate = () => {
       const nextDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
       setCurrentDate((value) => (value === nextDate ? value : nextDate));
-    }, 1000);
+    };
+    updateDate();
+    const timer = window.setInterval(updateDate, 60000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => {
+      setToast("");
+      setUndoMovie(null);
+    }, 4500);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    if (status !== "playing") window.requestAnimationFrame(() => resultRef.current?.focus({ preventScroll: true }));
+  }, [status]);
+
+  useEffect(() => {
+    const sections = ["how", "game", "archive", "progress", "vault"]
+      .map((id) => document.getElementById(id))
+      .filter((element): element is HTMLElement => Boolean(element));
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (visible?.target.id) setActiveSection(visible.target.id);
+      },
+      { rootMargin: "-24% 0px -58%", threshold: [0, 0.15, 0.35] },
+    );
+    sections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
   }, []);
 
   const pool = moviesForEra(decade);
@@ -238,13 +284,22 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     setQuery("");
     setGuesses([]);
     setStatus("playing");
-    setHighlight(0);
+    setHighlight(-1);
     setHintsUsed(0);
     setFinalScore(0);
     setToast("");
   }
 
-  function startGame(next: { decade?: Era; gameType?: GameType; mode?: Mode; archiveOffset?: number }) {
+  function scrollToSection(id: string) {
+    const target = document.getElementById(id);
+    if (!target) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+    target.focus({ preventScroll: true });
+    setActiveSection(id);
+  }
+
+  function applyGame(next: GameSelection) {
     const nextDecade = next.decade ?? decade;
     const nextMode = next.mode ?? mode;
     setDecade(nextDecade);
@@ -253,7 +308,24 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     setArchiveOffset(next.archiveOffset ?? (nextMode === "archive" ? archiveOffset : 0));
     if (nextMode === "practice") setPracticeIndex(Math.floor(Math.random() * moviesForEra(nextDecade).length));
     resetBoard();
-    window.setTimeout(() => document.getElementById("game")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    setPendingGame(null);
+    window.setTimeout(() => scrollToSection("game"), 0);
+  }
+
+  function startGame(next: GameSelection, force = false) {
+    const nextDecade = next.decade ?? decade;
+    const nextGameType = next.gameType ?? gameType;
+    const nextMode = next.mode ?? mode;
+    const nextArchiveOffset = next.archiveOffset ?? (nextMode === "archive" ? archiveOffset : 0);
+    const changesGame = nextDecade !== decade || nextGameType !== gameType || nextMode !== mode || nextArchiveOffset !== archiveOffset;
+
+    if (!changesGame && !force) return;
+    if (guesses.length > 0 && status === "playing" && !force) {
+      setPendingGame(next);
+      scrollToSection("game");
+      return;
+    }
+    applyGame(next);
   }
 
   function recordResult(won: boolean, guessesUsed: number, score: number) {
@@ -276,7 +348,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     event?.preventDefault();
     if (status !== "playing") return;
     const exact = pool.find((movie) => [movie.title, ...(movie.aliases || [])].some((name) => normalize(name) === normalizedQuery));
-    const movie = picked || exact || suggestions[highlight] || suggestions[0];
+    const movie = picked || (highlight >= 0 ? suggestions[highlight] : undefined) || exact || suggestions[0];
     if (!movie) {
       setToast("Choose a film from the suggestions.");
       return;
@@ -285,7 +357,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     const nextGuesses = [...guesses, movie];
     setGuesses(nextGuesses);
     setQuery("");
-    setHighlight(0);
+    setHighlight(-1);
     setToast("");
     if (movie.id === answer.id) {
       const score = scoreFor(gameType, nextGuesses.length, hintsUsed);
@@ -310,7 +382,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     }
     if (event.key === "Escape") {
       setQuery("");
-      setHighlight(0);
+      setHighlight(-1);
     }
   }
 
@@ -326,7 +398,15 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   function toggleVault(movie: Movie) {
     const exists = player.watchlist.includes(movie.id);
     savePlayer({ ...player, watchlist: exists ? player.watchlist.filter((id) => id !== movie.id) : [...player.watchlist, movie.id] });
+    setUndoMovie(exists ? movie : null);
     setToast(exists ? "Removed from your vault." : "Saved to your film vault.");
+  }
+
+  function undoVaultRemoval() {
+    if (!undoMovie || player.watchlist.includes(undoMovie.id)) return;
+    savePlayer({ ...player, watchlist: [...player.watchlist, undoMovie.id] });
+    setToast(`${undoMovie.title} restored.`);
+    setUndoMovie(null);
   }
 
   async function share() {
@@ -346,27 +426,26 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     .filter((movie): movie is Movie => Boolean(movie));
 
   return (
-    <main className={`site ${decade === "All" ? "era-all" : `era-${decade}`}`}>
-      <div className="texture" aria-hidden="true" />
-      {toast && <div className="global-toast" role="status">{toast}</div>}
+    <main id="top" className={`site ${decade === "All" ? "era-all" : `era-${decade}`}`}>
+      {toast && <div className="global-toast" role="status" aria-live="polite"><span>{toast}</span>{undoMovie && <button type="button" onClick={undoVaultRemoval}>Undo</button>}</div>}
 
       <header className="topbar">
         <div className="topbar-inner">
-          <button className="brand" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} aria-label="Chitram home">
+          <a className="brand" href="#top" aria-label="Chitram home">
             <span className="logo-mark" aria-hidden="true">
               <svg viewBox="0 0 44 44" focusable="false"><path d="M8 15h28v21H8z" /><path d="m9 15 5-7h8l-5 7m8 0 5-7h5l1 7" /><path d="m18 21 10 6-10 6z" /></svg>
             </span>
             <span className="brand-copy"><strong>Chitram</strong><small>Telugu movie game</small></span>
-          </button>
+          </a>
           <nav className="main-nav" aria-label="Main navigation">
-            <button className="nav-primary" onClick={() => document.getElementById("game")?.scrollIntoView({ behavior: "smooth" })}>Play</button>
-            <button onClick={() => document.getElementById("how")?.scrollIntoView({ behavior: "smooth" })}>How it works</button>
-            <button onClick={() => document.getElementById("archive")?.scrollIntoView({ behavior: "smooth" })}>Archive</button>
-            <button onClick={() => document.getElementById("vault")?.scrollIntoView({ behavior: "smooth" })}>Saved <span>{player.watchlist.length}</span></button>
+            <a className={activeSection === "game" ? "nav-primary" : ""} aria-current={activeSection === "game" ? "location" : undefined} href="#game" onClick={() => setActiveSection("game")}>Play</a>
+            <a className={activeSection === "how" ? "nav-primary" : ""} aria-current={activeSection === "how" ? "location" : undefined} href="#how" onClick={() => setActiveSection("how")}>How it works</a>
+            <a className={activeSection === "archive" ? "nav-primary" : ""} aria-current={activeSection === "archive" ? "location" : undefined} href="#archive" onClick={() => setActiveSection("archive")}>Archive</a>
+            <a className={activeSection === "vault" ? "nav-primary" : ""} aria-current={activeSection === "vault" ? "location" : undefined} href="#vault" onClick={() => setActiveSection("vault")}>Saved <span>{player.watchlist.length}</span></a>
           </nav>
-          <button className="streak-button" onClick={() => document.getElementById("progress")?.scrollIntoView({ behavior: "smooth" })}>
+          <a className="streak-button" href="#progress" aria-label={`${player.stats.streak} day streak. View progress.`}>
             <span>{player.stats.streak}</span><small>day streak</small>
-          </button>
+          </a>
         </div>
       </header>
 
@@ -376,8 +455,8 @@ export default function GameExperience({ initialDate }: { initialDate: string })
           <h1>How well do you know <em>Telugu cinema?</em></h1>
           <p>Guess the mystery movie using its year, cast, director and genre. You get six tries, and there is a new film every day.</p>
           <div className="hero-actions">
-            <button className="primary-cta" onClick={() => document.getElementById("game")?.scrollIntoView({ behavior: "smooth" })}>Play today&apos;s movie <span>→</span></button>
-            <button className="secondary-cta" onClick={() => startGame({ mode: "practice" })}>Practice without limits</button>
+            <a className="primary-cta" href="#game">Play today&apos;s movie <span>→</span></a>
+            <button className="secondary-cta" onClick={() => startGame({ mode: "practice" }, true)}>Practice without limits</button>
           </div>
           <div className="hero-facts">
             <span><strong>{ALL_MOVIES.length}</strong> movies</span>
@@ -388,12 +467,12 @@ export default function GameExperience({ initialDate }: { initialDate: string })
         <div className="hero-visual" role="img" aria-label="A cinema auditorium ready for a Telugu film">
           <div className="hero-show-card">
             <div><span>Now playing</span><strong>Mystery Movie</strong></div>
-            <div><span>Next movie in</span><strong>{countdown || "Midnight IST"}</strong></div>
+            <div><span>Next movie in</span><NextMovieCountdown /></div>
           </div>
         </div>
       </section>
 
-      <section className="quick-guide" id="how">
+      <section className="quick-guide section-target" id="how" tabIndex={-1}>
         <div className="guide-heading"><span>How to play</span><h2>Three simple steps.</h2></div>
         <div className="guide-grid">
           <article><span>1</span><div><strong>Choose your game</strong><p>Play today&apos;s movie or practise from any decade.</p></div></article>
@@ -402,32 +481,32 @@ export default function GameExperience({ initialDate }: { initialDate: string })
         </div>
       </section>
 
-      <section className="game-section" id="game">
+      <section className="game-section section-target" id="game" tabIndex={-1}>
         <div className="section-heading">
           <div><span className="section-kicker">Play</span><h2>Guess the movie.</h2></div>
           <p>{modeLabel}. {config.description}</p>
         </div>
 
         <div className="game-shell">
+          {pendingGame && <div className="restart-notice" role="alert"><div><strong>Start a different game?</strong><span>Your current guesses will be cleared.</span></div><div><button type="button" onClick={() => applyGame(pendingGame)}>Start new game</button><button type="button" className="secondary" onClick={() => setPendingGame(null)}>Keep playing</button></div></div>}
           <div className="game-setup">
             <fieldset>
               <legend>Game style</legend>
               <div className="setup-options format-options">
-                {GAME_TYPES.map((game) => <button key={game.id} className={gameType === game.id ? "active" : ""} onClick={() => startGame({ gameType: game.id })}><strong>{game.name}</strong><small>{game.maxGuesses} guesses</small></button>)}
+                {GAME_TYPES.map((game) => <button type="button" key={game.id} aria-pressed={gameType === game.id} className={gameType === game.id ? "active" : ""} onClick={() => startGame({ gameType: game.id })}><strong>{game.name}</strong><small>{game.maxGuesses} guesses</small></button>)}
               </div>
             </fieldset>
             <fieldset>
               <legend>Mode</legend>
-              <div className="setup-options">
-                <button className={mode === "daily" ? "active" : ""} onClick={() => startGame({ mode: "daily", archiveOffset: 0 })}>Daily</button>
-                <button className={mode === "practice" ? "active" : ""} onClick={() => startGame({ mode: "practice" })}>Practice</button>
-                <button className={mode === "archive" ? "active" : ""} onClick={() => document.getElementById("archive")?.scrollIntoView({ behavior: "smooth" })}>Archive</button>
+              <div className="setup-options mode-options">
+                <button type="button" aria-pressed={mode === "daily"} className={mode === "daily" ? "active" : ""} onClick={() => startGame({ mode: "daily", archiveOffset: 0 })}>Daily</button>
+                <button type="button" aria-pressed={mode === "practice"} className={mode === "practice" ? "active" : ""} onClick={() => startGame({ mode: "practice" })}>Practice</button>
               </div>
             </fieldset>
             <fieldset>
               <legend>Movies from</legend>
               <div className="setup-options era-options">
-                {ERAS.map((item) => <button key={item} className={decade === item ? "active" : ""} onClick={() => startGame({ decade: item })}>{item === "All" ? "All years" : item}</button>)}
+                {ERAS.map((item) => <button type="button" key={item} aria-pressed={decade === item} className={decade === item ? "active" : ""} onClick={() => startGame({ decade: item })}>{item === "All" ? "All years" : item}</button>)}
               </div>
             </fieldset>
           </div>
@@ -449,16 +528,16 @@ export default function GameExperience({ initialDate }: { initialDate: string })
                 <label htmlFor="film-search">Search for your next guess</label>
                 <div className="search-box">
                   <span aria-hidden="true">⌕</span>
-                  <input id="film-search" role="combobox" value={query} onChange={(event) => { setQuery(event.target.value); setHighlight(0); setToast(""); }} onKeyDown={onSearchKeyDown} aria-label="Search Telugu films" aria-autocomplete="list" aria-controls="film-suggestions" aria-expanded={suggestions.length > 0} autoComplete="off" placeholder="Type a movie title" />
+                  <input id="film-search" role="combobox" value={query} onChange={(event) => { setQuery(event.target.value); setHighlight(-1); setToast(""); }} onKeyDown={onSearchKeyDown} aria-autocomplete="list" aria-controls="film-suggestions" aria-expanded={suggestions.length > 0} aria-activedescendant={highlight >= 0 && suggestions[highlight] ? `film-option-${suggestions[highlight].id}` : undefined} autoComplete="off" placeholder="Type a movie title" />
                   <button type="submit">Guess</button>
                 </div>
-                {suggestions.length > 0 && <div className="suggestions" id="film-suggestions" role="listbox">{suggestions.map((movie, index) => <button type="button" role="option" aria-selected={index === highlight} className={index === highlight ? "highlight" : ""} key={movie.id} onMouseDown={() => submit(undefined, movie)}><MoviePoster movie={movie} className="suggestion-poster" /><span className="suggestion-copy"><strong>{movie.title}</strong><small>{movie.director}</small></span><em>{movie.year}</em></button>)}</div>}
+                {suggestions.length > 0 && <div className="suggestions" id="film-suggestions" role="listbox" aria-label="Movie suggestions">{suggestions.map((movie, index) => <button type="button" role="option" id={`film-option-${movie.id}`} aria-selected={index === highlight} tabIndex={-1} className={index === highlight ? "highlight" : ""} key={movie.id} onMouseDown={(event) => event.preventDefault()} onClick={() => submit(undefined, movie)}><MoviePoster movie={movie} className="suggestion-poster" /><span className="suggestion-copy"><strong>{movie.title}</strong><small>{movie.director}</small></span><em>{movie.year}</em></button>)}</div>}
               </form>
             ) : (
-              <div className={`result-card ${status}`}>
+              <div className={`result-card ${status}`} ref={resultRef} role="status" aria-live="polite" tabIndex={-1}>
                 <div className="result-reveal"><MoviePoster movie={answer} className="result-poster" /><div className="result-verdict"><span>{status === "won" ? "You got it!" : "The movie was"}</span><strong>{answer.title}</strong><small>{answer.year} · {answer.hero}<br />Directed by {answer.director}</small></div></div>
                 <div className="result-score"><span>{status === "won" ? "Your score" : "Try another movie"}</span><strong>{status === "won" ? finalScore.toLocaleString("en-IN") : "—"}</strong></div>
-                <div className="result-buttons"><button onClick={share}>Share result</button><button className="secondary" onClick={() => toggleVault(answer)}>{player.watchlist.includes(answer.id) ? "Saved" : "Save movie"}</button>{mode === "practice" && <button className="secondary" onClick={() => startGame({ mode: "practice" })}>Next movie</button>}</div>
+                <div className="result-buttons"><button type="button" onClick={share}>Share result</button><button type="button" className="secondary" onClick={() => toggleVault(answer)}>{player.watchlist.includes(answer.id) ? "Saved" : "Save movie"}</button>{mode === "practice" && <button type="button" className="secondary" onClick={() => startGame({ mode: "practice" }, true)}>Next movie</button>}</div>
               </div>
             )}
 
@@ -473,22 +552,26 @@ export default function GameExperience({ initialDate }: { initialDate: string })
                   { field: "lane", label: "Movie type", value: movieLane(guess), sub: "Movie type" },
                   { field: "words", label: "Title length", value: `${movieTitleWords(guess)} ${movieTitleWords(guess) === 1 ? "word" : "words"}`, sub: getResult("words", guess, answer) === "close" ? "Off by one" : "Title length" },
                 ];
-                return <div className="guess-row" key={guess.id}><div className="guess-title"><span>Guess {row + 1}</span><strong>{guess.title}</strong></div><div className="cells">{cells.map((cell, index) => <div className={`cell ${getResult(cell.field, guess, answer)}`} style={{ animationDelay: `${index * 55}ms` }} key={cell.field}><small className="cell-label">{cell.label}</small><strong>{cell.value}</strong><small className="cell-note">{cell.sub}</small></div>)}</div></div>;
+                return <div className="guess-row" key={guess.id}><div className="guess-title"><span>Guess {row + 1}</span><strong>{guess.title}</strong></div><div className="cells">{cells.map((cell, index) => {
+                  const result = getResult(cell.field, guess, answer);
+                  const resultLabel = result === "match" ? "Exact match" : result === "close" ? "Close" : "No match";
+                  return <div className={`cell ${result}`} aria-label={`${cell.label}: ${cell.value}. ${resultLabel}. ${cell.sub}.`} style={{ animationDelay: `${index * 45}ms` }} key={cell.field}><small className="cell-label">{cell.label}</small><strong>{cell.value}</strong><small className="cell-result">{resultLabel}</small><small className="cell-note">{cell.sub}</small></div>;
+                })}</div></div>;
               })}</div>}
             </div>
           </div>
         </div>
       </section>
 
-      <section className="library-section">
+      <section className="library-section section-target" tabIndex={-1}>
         <div className="section-heading"><div><span className="section-kicker">Your Chitram</span><h2>Come back anytime.</h2></div><p>Replay a recent puzzle, check your progress, or revisit movies you saved.</p></div>
         <div className="utility-grid">
-          <section className="utility-card archive-card" id="archive">
+          <section className="utility-card archive-card section-target" id="archive" tabIndex={-1}>
             <div className="utility-heading"><div><span>Past puzzles</span><h3>Play the last seven days</h3></div><small>Archive games do not affect your streak.</small></div>
             <div className="archive-list">{Array.from({ length: 7 }).map((_, index) => <button key={index} onClick={() => startGame({ mode: "archive", archiveOffset: index + 1 })}><span>{archiveLabel(currentDate, index + 1)}</span><strong>#{puzzleNumber(currentDate) - index - 1}</strong><small>Play →</small></button>)}</div>
           </section>
 
-          <section className="utility-card progress-card" id="progress">
+          <section className="utility-card progress-card section-target" id="progress" tabIndex={-1}>
             <div className="utility-heading"><div><span>Your progress</span><h3>At a glance</h3></div></div>
             <div className="stats-grid">
               <div><strong>{player.stats.played}</strong><span>Played</span></div>
@@ -498,9 +581,9 @@ export default function GameExperience({ initialDate }: { initialDate: string })
             </div>
           </section>
 
-          <section className="utility-card vault-card" id="vault">
+          <section className="utility-card vault-card section-target" id="vault" tabIndex={-1}>
             <div className="utility-heading"><div><span>Saved movies</span><h3>Your film list</h3></div><small>Saved only on this device.</small></div>
-            {savedMovies.length ? <div className="vault-grid">{savedMovies.map((movie) => <article key={movie.id}><MoviePoster movie={movie} className="vault-poster" /><div><strong>{movie.title}</strong><small>{movie.year} · {movie.director}</small><button onClick={() => toggleVault(movie)}>Remove</button></div></article>)}</div> : <div className="empty-vault"><strong>No saved movies yet</strong><p>Finish a game and choose “Save movie” to build your list.</p></div>}
+            {savedMovies.length ? <div className="vault-grid">{savedMovies.map((movie) => <article key={movie.id}><MoviePoster movie={movie} className="vault-poster" /><div><strong>{movie.title}</strong><small>{movie.year} · {movie.director}</small><button type="button" onClick={() => toggleVault(movie)}>Remove</button></div></article>)}</div> : <div className="empty-vault"><strong>No saved movies yet</strong><p>Finish a game and choose “Save movie” to build your list.</p></div>}
           </section>
         </div>
       </section>
@@ -508,7 +591,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
       <footer className="site-footer">
         <div className="footer-main"><span className="logo-mark" aria-hidden="true"><svg viewBox="0 0 44 44" focusable="false"><path d="M8 15h28v21H8z" /><path d="m9 15 5-7h8l-5 7m8 0 5-7h5l1 7" /><path d="m18 21 10 6-10 6z" /></svg></span><div><strong>Chitram</strong><small>A Telugu movie guessing game.</small></div></div>
         <a className="tmdb-credit" href="https://www.themoviedb.org" target="_blank" rel="noreferrer"><span className="tmdb-logo" aria-hidden="true" /><small>This product uses the TMDB API but is not endorsed or certified by TMDB.</small></a>
-        <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Back to top ↑</button>
+        <a className="back-to-top" href="#top">Back to top ↑</a>
       </footer>
     </main>
   );
