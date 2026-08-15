@@ -1,4 +1,4 @@
-Is it your daughter? She's very, very pretty hey your business too so much business you're having trouble i bars to be community what is that primatic set are new gent of a storn singalo park sharing smart left# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
 /node_modules
@@ -29,6 +29,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel

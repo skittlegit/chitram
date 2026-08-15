@@ -11,6 +11,7 @@ A premium Telugu cinema guessing game built with the Next.js App Router.
 - Optional progressive hints with score penalties that skip facts already revealed by exact guesses.
 - Local streaks, points, achievements, guess distribution, and best score.
 - A device-local film vault for saving revealed movies.
+- TMDB-backed poster art in search results, film reveals, and the vault, with a built-in fallback when no poster is available.
 - 459 Telugu films from 2000 onward, spanning major-star filmographies, breakout hits, cult favourites, and recognizable high-profile flops.
 
 ## Local development
@@ -24,6 +25,8 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+To enable real poster art, copy `.env.example` to `.env.local` and add a TMDB API Read Access Token. Without a token, the app automatically serves branded Chitram poster placeholders.
+
 ## Scripts
 
 - `npm run dev` starts the local Next.js server.
@@ -36,4 +39,4 @@ Open [http://localhost:3000](http://localhost:3000).
 
 Import this repository into Vercel. It detects Next.js automatically, so no framework override or custom build command is required.
 
-Optionally set `NEXT_PUBLIC_SITE_URL` to the canonical production URL (for example, `https://chitram.example.com`). Production deployments also use Vercel's provided production URL automatically.
+Set `TMDB_API_TOKEN` in the Vercel project environment to enable posters. Optionally set `NEXT_PUBLIC_SITE_URL` to the canonical production URL (for example, `https://chitram.example.com`). Production deployments also use Vercel's provided production URL automatically.

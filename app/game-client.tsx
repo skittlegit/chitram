@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ALL_MOVIES, DECADES, GAME_TYPES, MOVIES, gameConfig, movieLane, movieTitleWords, type Decade, type GameType, type Movie } from "./game-data";
 
@@ -144,6 +145,26 @@ function moviesForEra(era: Era) {
 
 function eraLabel(era: Era) {
   return era === "All" ? "All eras" : era;
+}
+
+function MoviePoster({ movie, className = "" }: { movie: Movie; className?: string }) {
+  const [failed, setFailed] = useState(false);
+
+  return (
+    <span className={`movie-poster ${className}`}>
+      <span className="poster-fallback" aria-hidden="true"><b>{movie.title.slice(0, 1)}</b><small>{movie.year}</small></span>
+      {!failed && (
+        <Image
+          src={`/api/poster?id=${encodeURIComponent(movie.id)}`}
+          alt={`${movie.title} (${movie.year}) poster`}
+          fill
+          sizes={className === "result-poster" ? "110px" : "60px"}
+          unoptimized
+          onError={() => setFailed(true)}
+        />
+      )}
+    </span>
+  );
 }
 
 export default function GameExperience({ initialDate }: { initialDate: string }) {
@@ -422,12 +443,12 @@ export default function GameExperience({ initialDate }: { initialDate: string })
                     <input id="film-search" role="combobox" value={query} onChange={(event) => { setQuery(event.target.value); setHighlight(0); setToast(""); }} onKeyDown={onSearchKeyDown} aria-label="Search Telugu films" aria-autocomplete="list" aria-controls="film-suggestions" aria-expanded={suggestions.length > 0} autoComplete="off" placeholder="Type a Telugu film title..." />
                     <button type="submit">Lock it in <span>→</span></button>
                   </div>
-                  {suggestions.length > 0 && <div className="suggestions" id="film-suggestions" role="listbox">{suggestions.map((movie, index) => <button type="button" role="option" aria-selected={index === highlight} className={index === highlight ? "highlight" : ""} key={movie.id} onMouseDown={() => submit(undefined, movie)}><span><strong>{movie.title}</strong><small>{movie.director}</small></span><em>{movie.year}</em></button>)}</div>}
+                  {suggestions.length > 0 && <div className="suggestions" id="film-suggestions" role="listbox">{suggestions.map((movie, index) => <button type="button" role="option" aria-selected={index === highlight} className={index === highlight ? "highlight" : ""} key={movie.id} onMouseDown={() => submit(undefined, movie)}><MoviePoster movie={movie} className="suggestion-poster" /><span className="suggestion-copy"><strong>{movie.title}</strong><small>{movie.director}</small></span><em>{movie.year}</em></button>)}</div>}
                   {toast && <div className="toast" role="status">{toast}</div>}
                 </form>
               ) : (
                 <div className={`result-card ${status}`}>
-                  <div className="result-verdict"><span>{status === "won" ? "BOMMA BLOCKBUSTER" : "END CREDITS"}</span><strong>{answer.title}</strong><small>{answer.year} · {answer.hero} · A {answer.director} film</small></div>
+                  <div className="result-reveal"><MoviePoster movie={answer} className="result-poster" /><div className="result-verdict"><span>{status === "won" ? "BOMMA BLOCKBUSTER" : "END CREDITS"}</span><strong>{answer.title}</strong><small>{answer.year} · {answer.hero} · A {answer.director} film</small></div></div>
                   <div className="result-score"><span>{status === "won" ? "FINAL SCORE" : "BETTER LUCK NEXT SHOW"}</span><strong>{status === "won" ? finalScore.toLocaleString("en-IN") : "—"}</strong></div>
                   <div className="result-buttons"><button onClick={share}>Share result</button><button className="secondary" onClick={() => toggleVault(answer)}>{player.watchlist.includes(answer.id) ? "Saved to vault" : "+ Save film"}</button>{mode === "practice" && <button className="secondary" onClick={() => startGame({ mode: "practice" })}>Next film</button>}</div>
                   {toast && <div className="toast result-toast" role="status">{toast}</div>}
@@ -487,7 +508,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
 
       <footer className="site-footer">
         <div className="footer-brand"><span className="brand-mark" aria-hidden="true"><i /><b>చి</b><i /></span><div><strong>CHITRAM</strong><small>Made for Telugu cinema people.</small></div></div>
-        <p>From the first whistle to the final frame.</p>
+        <div className="footer-credits"><p>From the first whistle to the final frame.</p><a href="https://www.themoviedb.org" target="_blank" rel="noreferrer" aria-label="Poster data provided by The Movie Database"><span className="tmdb-logo" aria-hidden="true" /><small>This product uses the TMDB API but is not endorsed or certified by TMDB.</small></a></div>
         <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Back to top ↑</button>
       </footer>
 
@@ -495,7 +516,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
         {modal === "how" && <><span className="modal-kicker">HOUSE RULES</span><h2 id="modal-title">Read the cinema.</h2><p className="modal-intro">Search any film from the selected range. Choose All eras to play across the complete 2000–2020s catalogue. Every guess compares six details with the mystery picture.</p><div className="rule-list"><div><i className="green" /><strong>Exact match</strong><span>You are on the money.</span></div><div><i className="amber" /><strong>Close connection</strong><span>Nearby year, shared genre or film family.</span></div><div><i /><strong>No connection</strong><span>Take the next guess in another direction.</span></div></div><p className="modal-note">Arrows point toward an earlier or later release. Paid hints skip facts your guesses have already revealed.</p></>}
         {modal === "stats" && <><span className="modal-kicker">YOUR BOX OFFICE</span><h2 id="modal-title">The numbers don&apos;t lie.</h2><div className="big-stats"><div><strong>{player.stats.played}</strong><span>PLAYED</span></div><div><strong>{player.stats.played ? Math.round(player.stats.wins / player.stats.played * 100) : 0}%</strong><span>WIN RATE</span></div><div><strong>{player.stats.streak}</strong><span>STREAK</span></div><div><strong>{player.stats.bestScore.toLocaleString("en-IN")}</strong><span>BEST</span></div></div><h3 className="modal-subhead">Guess distribution</h3><div className="distribution">{player.stats.distribution.map((value, index) => <div key={index}><span>{index + 1}</span><i style={{ width: `${Math.max(8, value / Math.max(1, ...player.stats.distribution) * 100)}%` }} /><strong>{value}</strong></div>)}</div><h3 className="modal-subhead">Achievements</h3><div className="achievement-grid">{achievements.map((achievement) => <div key={achievement.name} className={achievement.unlocked ? "unlocked" : ""}><span>{achievement.unlocked ? "✦" : "○"}</span><strong>{achievement.name}</strong><small>{achievement.detail}</small></div>)}</div></>}
         {modal === "archive" && <><span className="modal-kicker">SEVEN-DAY ARCHIVE</span><h2 id="modal-title">Rewind the reel.</h2><p className="modal-intro">Choose a previous daily puzzle. Archive plays use your currently selected game format and era.</p><div className="modal-archive">{Array.from({ length: 7 }).map((_, index) => <button key={index} onClick={() => { setModal(null); startGame({ mode: "archive", archiveOffset: index + 1 }); }}><span>{archiveLabel(currentDate, index + 1)}</span><strong>Puzzle #{puzzleNumber(currentDate) - index - 1}</strong><small>PLAY NOW →</small></button>)}</div></>}
-        {modal === "vault" && <><span className="modal-kicker">MY FILM VAULT</span><h2 id="modal-title">Saved for interval.</h2><p className="modal-intro">Keep a personal list of films revealed during play. It stays on this device.</p>{player.watchlist.length ? <div className="vault-grid">{player.watchlist.map((id) => ALL_MOVIES.find((movie) => movie.id === id)).filter((movie): movie is Movie => Boolean(movie)).map((movie) => <article key={movie.id}><div className="vault-poster"><span>{movie.year}</span><strong>{movie.title.slice(0, 1)}</strong></div><div><strong>{movie.title}</strong><small>{movie.director}</small><button onClick={() => toggleVault(movie)}>Remove</button></div></article>)}</div> : <div className="empty-vault"><span>◎</span><strong>No films saved yet.</strong><p>Finish a game and add the reveal to your vault.</p></div>}</>}
+        {modal === "vault" && <><span className="modal-kicker">MY FILM VAULT</span><h2 id="modal-title">Saved for interval.</h2><p className="modal-intro">Keep a personal list of films revealed during play. It stays on this device.</p>{player.watchlist.length ? <div className="vault-grid">{player.watchlist.map((id) => ALL_MOVIES.find((movie) => movie.id === id)).filter((movie): movie is Movie => Boolean(movie)).map((movie) => <article key={movie.id}><MoviePoster movie={movie} className="vault-poster" /><div><strong>{movie.title}</strong><small>{movie.director}</small><button onClick={() => toggleVault(movie)}>Remove</button></div></article>)}</div> : <div className="empty-vault"><span>◎</span><strong>No films saved yet.</strong><p>Finish a game and add the reveal to your vault.</p></div>}</>}
       </section></div>}
     </main>
   );
