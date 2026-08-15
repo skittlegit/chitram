@@ -1,3 +1,5 @@
+import { CATALOG_ADDITIONS, type CatalogLane } from "./movie-catalog";
+
 export type Decade = "2000s" | "2010s" | "2020s";
 export type GameType = "classic" | "spotlight" | "rush";
 
@@ -13,6 +15,7 @@ export type Movie = {
   release: string;
   difficulty: "Crowd pleaser" | "Fan favourite" | "Deep cut";
   storyClue: string;
+  lane?: CatalogLane;
   aliases?: string[];
 };
 
@@ -74,6 +77,64 @@ export const MOVIES: Record<Decade, Movie[]> = {
     { id: "luckybaskhar", title: "Lucky Baskhar", year: 2024, hero: "Dulquer Salmaan", family: "Other", director: "Venky Atluri", genres: ["Crime", "Drama"], banner: "Sithara Entertainments", release: "Regular", difficulty: "Deep cut", storyClue: "A bank cashier discovers how quickly money can rewrite morality.", aliases: ["Lucky Bhaskar"] },
   ],
 };
+
+function familyFor(lead: string) {
+  if (["Chiranjeevi", "Pawan Kalyan", "Allu Arjun", "Ram Charan", "Varun Tej", "Sai Dharam Tej", "Vaisshnav Tej"].some((name) => lead.includes(name))) return "Mega";
+  if (["Nandamuri Balakrishna", "Jr NTR", "Nandamuri Kalyan Ram"].some((name) => lead.includes(name))) return "Nandamuri";
+  if (["Nagarjuna", "Naga Chaitanya", "Akhil Akkineni", "Akkineni family"].some((name) => lead.includes(name))) return "Akkineni";
+  if (["Venkatesh", "Rana Daggubati"].some((name) => lead.includes(name))) return "Daggubati";
+  if (lead.includes("Mahesh Babu")) return "Ghattamaneni";
+  return "Other";
+}
+
+function slugFor(title: string) {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+function decadeFor(year: number): Decade {
+  if (year < 2010) return "2000s";
+  if (year < 2020) return "2010s";
+  return "2020s";
+}
+
+const existingMovies = new Set(Object.values(MOVIES).flat().map((movie) => `${normalizeTitle(movie.title)}-${movie.year}`));
+
+function normalizeTitle(title: string) {
+  return title.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+for (const [title, year, hero, director, genres, lane] of CATALOG_ADDITIONS) {
+  const key = `${normalizeTitle(title)}-${year}`;
+  if (existingMovies.has(key)) continue;
+  MOVIES[decadeFor(year)].push({
+    id: `${slugFor(title)}-${year}`,
+    title,
+    year,
+    hero,
+    family: familyFor(hero),
+    director,
+    genres: genres.split("/"),
+    banner: lane,
+    release: "Regular",
+    difficulty: lane === "Star vehicle" ? "Crowd pleaser" : lane === "Breakout hit" ? "Fan favourite" : "Deep cut",
+    storyClue: `A ${genres.toLowerCase().replace("/", " and ")} film in the ${lane.toLowerCase()} lane.`,
+    lane,
+  });
+  existingMovies.add(key);
+}
+
+for (const decade of DECADES) MOVIES[decade].sort((a, b) => a.year - b.year || a.title.localeCompare(b.title));
+
+export function movieLane(movie: Movie): CatalogLane {
+  if (movie.lane) return movie.lane;
+  if (movie.difficulty === "Crowd pleaser") return "Star vehicle";
+  if (movie.difficulty === "Fan favourite") return "Breakout hit";
+  return "Cult favourite";
+}
+
+export function movieTitleWords(movie: Movie) {
+  return movie.title.trim().split(/\s+/).length;
+}
 
 export const ALL_MOVIES = Object.values(MOVIES).flat();
 

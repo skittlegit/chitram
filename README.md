@@ -6,11 +6,11 @@ A premium Telugu cinema guessing game built with the Next.js App Router.
 
 - Three formats: Classic Cut, Spotlight, and First Day First Show.
 - Daily challenge, unlimited practice, and a seven-day archive.
-- Colour-coded year, lead, director, genre, banner, and release clues.
+- Colour-coded year, lead, director, genre, film-lane, and title-size clues.
 - Optional progressive hints with score penalties.
 - Local streaks, points, achievements, guess distribution, and best score.
 - A device-local film vault for saving revealed movies.
-- 36 curated Telugu films across the 2000s, 2010s, and 2020s.
+- 459 Telugu films from 2000 onward, spanning major-star filmographies, breakout hits, cult favourites, and recognizable high-profile flops.
 
 ## Local development
 

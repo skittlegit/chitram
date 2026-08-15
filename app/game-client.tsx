@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { ALL_MOVIES, DECADES, GAME_TYPES, MOVIES, gameConfig, type Decade, type GameType, type Movie } from "./game-data";
+import { ALL_MOVIES, DECADES, GAME_TYPES, MOVIES, gameConfig, movieLane, movieTitleWords, type Decade, type GameType, type Movie } from "./game-data";
 
 type Mode = "daily" | "practice" | "archive";
 type Result = "match" | "close" | "miss";
@@ -102,12 +102,16 @@ function getResult(field: string, guess: Movie, answer: Movie): Result {
   if (field === "hero") return guess.hero === answer.hero ? "match" : guess.family !== "Other" && (answer.family.includes(guess.family) || guess.family.includes(answer.family)) ? "close" : "miss";
   if (field === "director") return guess.director === answer.director ? "match" : "miss";
   if (field === "genres") return guess.genres.join() === answer.genres.join() ? "match" : guess.genres.some((genre) => answer.genres.includes(genre)) ? "close" : "miss";
-  if (field === "banner") return guess.banner === answer.banner ? "match" : "miss";
-  return guess.release === answer.release ? "match" : "miss";
+  if (field === "lane") return movieLane(guess) === movieLane(answer) ? "match" : "miss";
+  if (field === "words") {
+    const difference = Math.abs(movieTitleWords(guess) - movieTitleWords(answer));
+    return difference === 0 ? "match" : difference === 1 ? "close" : "miss";
+  }
+  return "miss";
 }
 
 function resultEmoji(guess: Movie, answer: Movie) {
-  return ["year", "hero", "director", "genres", "banner", "release"]
+  return ["year", "hero", "director", "genres", "lane", "words"]
     .map((field) => ({ match: "🟩", close: "🟨", miss: "⬛" })[getResult(field, guess, answer)])
     .join("");
 }
@@ -177,7 +181,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
 
   const clues = [
     { label: "Story beat", value: answer.storyClue },
-    { label: "Release window", value: `${answer.year} · ${answer.release}` },
+    { label: "Release year", value: String(answer.year) },
     { label: "Genre signal", value: answer.genres.join(" / ") },
     { label: "The filmmaker", value: answer.director },
     { label: "Lead billing", value: answer.hero },
@@ -332,7 +336,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
             <button className="text-cta" onClick={() => startGame({ mode: "practice" })}>Try unlimited mode</button>
           </div>
           <div className="hero-proof">
-            <div><strong>36</strong><span>handpicked films</span></div>
+            <div><strong>{ALL_MOVIES.length}</strong><span>handpicked films</span></div>
             <div><strong>03</strong><span>game formats</span></div>
             <div><strong>{player.stats.streak.toString().padStart(2, "0")}</strong><span>your streak</span></div>
           </div>
@@ -407,7 +411,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
               )}
 
               <div className="clue-board">
-                <div className="grid-head">{["YEAR", "HERO", "DIRECTOR", "GENRE", "BANNER", "RELEASE"].map((column) => <span key={column}>{column}</span>)}</div>
+                <div className="grid-head">{["YEAR", "LEAD", "DIRECTOR", "GENRE", "FILM LANE", "TITLE SIZE"].map((column) => <span key={column}>{column}</span>)}</div>
                 {guesses.length === 0 ? (
                   <div className="empty-board"><div className="reel-icon">◉</div><strong>The projector is rolling</strong><span>Your comparison clues will develop here after the first guess.</span></div>
                 ) : (
@@ -417,8 +421,8 @@ export default function GameExperience({ initialDate }: { initialDate: string })
                       { field: "hero", value: guess.hero, sub: getResult("hero", guess, answer) === "close" ? "SAME FILM FAMILY" : "LEAD" },
                       { field: "director", value: guess.director, sub: "DIRECTOR" },
                       { field: "genres", value: guess.genres.join(" / "), sub: getResult("genres", guess, answer) === "close" ? "GENRE OVERLAP" : "GENRE" },
-                      { field: "banner", value: guess.banner, sub: "PRODUCTION" },
-                      { field: "release", value: guess.release, sub: "RELEASE SLOT" },
+                      { field: "lane", value: movieLane(guess), sub: "FILM LANE" },
+                      { field: "words", value: `${movieTitleWords(guess)} ${movieTitleWords(guess) === 1 ? "WORD" : "WORDS"}`, sub: getResult("words", guess, answer) === "close" ? "OFF BY ONE" : "TITLE SIZE" },
                     ];
                     return <div className="guess-row" key={guess.id}><div className="guess-title"><span>TAKE {String(row + 1).padStart(2, "0")}</span><strong>{guess.title}</strong></div><div className="cells">{cells.map((cell, index) => <div className={`cell ${getResult(cell.field, guess, answer)}`} style={{ animationDelay: `${index * 80}ms` }} key={cell.field}><strong>{cell.value}</strong><small>{cell.sub}</small></div>)}</div></div>;
                   })}</div>
