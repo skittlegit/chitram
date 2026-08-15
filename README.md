@@ -1,6 +1,16 @@
 # Chitram
 
-A daily Telugu cinema guessing game built with the Next.js App Router.
+A premium Telugu cinema guessing game built with the Next.js App Router.
+
+## Game features
+
+- Three formats: Classic Cut, Spotlight, and First Day First Show.
+- Daily challenge, unlimited practice, and a seven-day archive.
+- Colour-coded year, lead, director, genre, banner, and release clues.
+- Optional progressive hints with score penalties.
+- Local streaks, points, achievements, guess distribution, and best score.
+- A device-local film vault for saving revealed movies.
+- 36 curated Telugu films across the 2000s, 2010s, and 2020s.
 
 ## Local development
 
