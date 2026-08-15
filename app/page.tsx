@@ -1,10 +1,11 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, useMemo, useState, useSyncExternalStore } from "react";
 
 type Decade = "2000s" | "2010s" | "2020s";
 type Mode = "daily" | "practice";
 type Result = "match" | "close" | "miss";
+type Stats = { played: number; wins: number; streak: number };
 
 type Movie = {
   id: string;
@@ -54,6 +55,35 @@ const MOVIES: Record<Decade, Movie[]> = {
 
 const DECADES: Decade[] = ["2000s", "2010s", "2020s"];
 const MAX_GUESSES = 6;
+const EMPTY_STATS: Stats = { played: 0, wins: 0, streak: 0 };
+const STATS_KEY = "chitram-stats";
+const STATS_EVENT = "chitram-stats-change";
+
+let cachedStatsJson: string | null = null;
+let cachedStats: Stats = EMPTY_STATS;
+
+function subscribeToStats(callback: () => void) {
+  window.addEventListener("storage", callback);
+  window.addEventListener(STATS_EVENT, callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener(STATS_EVENT, callback);
+  };
+}
+
+function getStatsSnapshot(): Stats {
+  const statsJson = localStorage.getItem(STATS_KEY);
+  if (statsJson === cachedStatsJson) return cachedStats;
+
+  cachedStatsJson = statsJson;
+  try {
+    cachedStats = statsJson ? JSON.parse(statsJson) : EMPTY_STATS;
+  } catch {
+    cachedStats = EMPTY_STATS;
+  }
+
+  return cachedStats;
+}
 
 function normalize(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/aa/g, "a").replace(/ee/g, "i").replace(/oo/g, "u").replace(/th/g, "t").replace(/sh/g, "s");
@@ -96,11 +126,7 @@ export default function Home() {
   const [highlight, setHighlight] = useState(0);
   const [modal, setModal] = useState<"help" | "stats" | null>(null);
   const [toast, setToast] = useState("");
-  const [stats, setStats] = useState(() => {
-    if (typeof window === "undefined") return { played: 0, wins: 0, streak: 0 };
-    try { return JSON.parse(localStorage.getItem("chitram-stats") || "null") || { played: 0, wins: 0, streak: 0 }; }
-    catch { return { played: 0, wins: 0, streak: 0 }; }
-  });
+  const stats = useSyncExternalStore(subscribeToStats, getStatsSnapshot, () => EMPTY_STATS);
 
   const pool = MOVIES[decade];
   const answer = mode === "daily" ? dailyMovie(decade) : pool[practiceIndex % pool.length];
@@ -127,8 +153,8 @@ export default function Home() {
 
   function saveStats(won: boolean) {
     const next = { played: stats.played + 1, wins: stats.wins + Number(won), streak: won ? stats.streak + 1 : 0 };
-    setStats(next);
-    localStorage.setItem("chitram-stats", JSON.stringify(next));
+    localStorage.setItem(STATS_KEY, JSON.stringify(next));
+    window.dispatchEvent(new Event(STATS_EVENT));
   }
 
   function submit(event?: FormEvent, picked?: Movie) {

@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -13,21 +12,29 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("x-forwarded-host") || requestHeaders.get("host") || "localhost:3000";
-  const protocol = requestHeaders.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
-  const origin = `${protocol}://${host}`;
-  const title = "Chitram — The Daily Telugu Movie Riddle";
-  const description = "Guess a Telugu film from clues across eras of Tollywood cinema.";
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : "http://localhost:3000");
 
-  return {
-    title,
-    description,
-    openGraph: { title, description, type: "website", images: [{ url: `${origin}/og.png`, width: 1730, height: 907, alt: "Chitram Telugu movie guessing game" }] },
-    twitter: { card: "summary_large_image", title, description, images: [`${origin}/og.png`] },
-  };
-}
+export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
+  title: "Chitram — The Daily Telugu Movie Riddle",
+  description: "Guess a Telugu film from clues across eras of Tollywood cinema.",
+  openGraph: {
+    title: "Chitram — The Daily Telugu Movie Riddle",
+    description: "Guess a Telugu film from clues across eras of Tollywood cinema.",
+    type: "website",
+    images: [{ url: "/og.png", width: 1730, height: 907, alt: "Chitram Telugu movie guessing game" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Chitram — The Daily Telugu Movie Riddle",
+    description: "Guess a Telugu film from clues across eras of Tollywood cinema.",
+    images: ["/og.png"],
+  },
+};
 
 export default function RootLayout({
   children,
