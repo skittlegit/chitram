@@ -6,6 +6,11 @@ import { ALL_MOVIES, DECADES, GAME_TYPES, MOVIES, gameConfig, movieLane, movieTi
 type Mode = "daily" | "practice" | "archive";
 type Result = "match" | "close" | "miss";
 type Modal = "how" | "stats" | "vault" | "archive" | null;
+type Era = Decade | "All";
+type ClueField = "year" | "genres" | "director" | "hero" | "lane";
+
+const ERAS: Era[] = ["All", ...DECADES];
+const MAX_PAID_HINTS = 3;
 
 type PlayerStats = {
   played: number;
@@ -133,10 +138,18 @@ function nextPuzzleCountdown() {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
+function moviesForEra(era: Era) {
+  return era === "All" ? ALL_MOVIES : MOVIES[era];
+}
+
+function eraLabel(era: Era) {
+  return era === "All" ? "All eras" : era;
+}
+
 export default function GameExperience({ initialDate }: { initialDate: string }) {
   const [currentDate, setCurrentDate] = useState(initialDate);
   const [countdown, setCountdown] = useState("");
-  const [decade, setDecade] = useState<Decade>("2010s");
+  const [decade, setDecade] = useState<Era>("All");
   const [gameType, setGameType] = useState<GameType>("classic");
   const [mode, setMode] = useState<Mode>("daily");
   const [archiveOffset, setArchiveOffset] = useState(0);
@@ -160,12 +173,13 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     return () => window.clearInterval(timer);
   }, []);
 
-  const pool = MOVIES[decade];
+  const pool = moviesForEra(decade);
   const config = gameConfig(gameType);
   const answer = useMemo(() => {
     if (mode === "practice") return pool[practiceIndex % pool.length];
     const gameIndex = GAME_TYPES.findIndex((game) => game.id === gameType);
-    const seed = puzzleNumber(currentDate) - archiveOffset + DECADES.indexOf(decade) * 17 + gameIndex * 29;
+    const eraIndex = decade === "All" ? 0 : DECADES.indexOf(decade) + 1;
+    const seed = puzzleNumber(currentDate) - archiveOffset + eraIndex * 17 + gameIndex * 29;
     return pool[Math.abs(seed) % pool.length];
   }, [archiveOffset, currentDate, decade, gameType, mode, pool, practiceIndex]);
 
@@ -179,15 +193,25 @@ export default function GameExperience({ initialDate }: { initialDate: string })
       .slice(0, 6);
   }, [guesses, normalizedQuery, pool]);
 
-  const clues = [
-    { label: "Story beat", value: answer.storyClue },
-    { label: "Release year", value: String(answer.year) },
-    { label: "Genre signal", value: answer.genres.join(" / ") },
-    { label: "The filmmaker", value: answer.director },
-    { label: "Lead billing", value: answer.hero },
+  const clues: { label: string; value: string; field?: ClueField }[] = [
+    answer.lane
+      ? { label: "Film lane", value: movieLane(answer), field: "lane" }
+      : { label: "Story beat", value: answer.storyClue },
+    { label: "Release year", value: String(answer.year), field: "year" },
+    { label: "Genre signal", value: answer.genres.join(" / "), field: "genres" },
+    { label: "The filmmaker", value: answer.director, field: "director" },
+    { label: "Lead billing", value: answer.hero, field: "hero" },
   ];
-  const earnedClues = gameType === "rush" ? 2 : gameType === "spotlight" ? Math.min(1 + guesses.length, clues.length) : 0;
-  const revealedClues = Math.min(clues.length, earnedClues + hintsUsed);
+  const knownClueFields = new Set<ClueField>(
+    (["year", "genres", "director", "hero", "lane"] as ClueField[]).filter((field) =>
+      guesses.some((guess) => getResult(field, guess, answer) === "match"),
+    ),
+  );
+  const availableClues = clues.filter((clue) => !clue.field || !knownClueFields.has(clue.field));
+  const earnedClues = gameType === "rush" ? 2 : gameType === "spotlight" ? 1 + guesses.length : 0;
+  const visibleClues = availableClues.slice(0, earnedClues + hintsUsed);
+  const revealedClues = visibleClues.length;
+  const canRevealHint = status === "playing" && hintsUsed < MAX_PAID_HINTS && visibleClues.length < availableClues.length;
   const potentialScore = scoreFor(gameType, Math.max(1, guesses.length + 1), hintsUsed);
   const guessesLeft = config.maxGuesses - guesses.length;
 
@@ -208,14 +232,14 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     setToast("");
   }
 
-  function startGame(next: { decade?: Decade; gameType?: GameType; mode?: Mode; archiveOffset?: number }) {
+  function startGame(next: { decade?: Era; gameType?: GameType; mode?: Mode; archiveOffset?: number }) {
     const nextDecade = next.decade ?? decade;
     const nextMode = next.mode ?? mode;
     setDecade(nextDecade);
     setGameType(next.gameType ?? gameType);
     setMode(nextMode);
     setArchiveOffset(next.archiveOffset ?? (nextMode === "archive" ? archiveOffset : 0));
-    if (nextMode === "practice") setPracticeIndex(Math.floor(Math.random() * MOVIES[nextDecade].length));
+    if (nextMode === "practice") setPracticeIndex(Math.floor(Math.random() * moviesForEra(nextDecade).length));
     resetBoard();
     window.setTimeout(() => document.getElementById("game")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
@@ -279,8 +303,8 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   }
 
   function revealHint() {
-    if (revealedClues >= clues.length) {
-      setToast("Every clue is already on screen.");
+    if (!canRevealHint) {
+      setToast("Every useful clue is already known or on screen.");
       return;
     }
     setHintsUsed((value) => value + 1);
@@ -295,7 +319,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
 
   async function share() {
     const gameName = config.name;
-    const text = `Chitram #${puzzleNumber(currentDate) - archiveOffset} · ${gameName} · ${decade}\n${guesses.map((guess) => resultEmoji(guess, answer)).join("\n")}\n${status === "won" ? `${guesses.length}/${config.maxGuesses} · ${finalScore} pts` : `X/${config.maxGuesses}`} · chitram.game`;
+    const text = `Chitram #${puzzleNumber(currentDate) - archiveOffset} · ${gameName} · ${eraLabel(decade)}\n${guesses.map((guess) => resultEmoji(guess, answer)).join("\n")}\n${status === "won" ? `${guesses.length}/${config.maxGuesses} · ${finalScore} pts` : `X/${config.maxGuesses}`} · chitram.game`;
     try {
       await navigator.clipboard.writeText(text);
       setToast("Result copied. Send it to the group chat.");
@@ -307,22 +331,22 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   const modeLabel = mode === "practice" ? "Unlimited rehearsal" : mode === "archive" ? `${archiveLabel(currentDate, archiveOffset)} archive` : "Today's premiere";
 
   return (
-    <main className={`site era-${decade}`}>
+    <main className={`site ${decade === "All" ? "era-all" : `era-${decade}`}`}>
       <div className="texture" aria-hidden="true" />
 
       <header className="topbar">
         <button className="brand" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} aria-label="Chitram home">
-          <span className="brand-seal">చి</span>
-          <span className="brand-copy"><strong>CHITRAM</strong><small>తెలుగు సినిమా ఆట</small></span>
+          <span className="brand-mark" aria-hidden="true"><i /><b>చి</b><i /></span>
+          <span className="brand-copy"><strong>CHITRAM<span>.</span></strong><small>THE TELUGU MOVIE GAME</small></span>
         </button>
         <nav className="main-nav" aria-label="Main navigation">
-          <button onClick={() => document.getElementById("game")?.scrollIntoView({ behavior: "smooth" })}>Play</button>
-          <button onClick={() => setModal("archive")}>Archive</button>
-          <button onClick={() => setModal("vault")}>My vault <span>{player.watchlist.length}</span></button>
+          <button className="nav-primary" onClick={() => document.getElementById("game")?.scrollIntoView({ behavior: "smooth" })}>Play now</button>
+          <button onClick={() => setModal("archive")}>Past puzzles</button>
+          <button onClick={() => setModal("vault")}>Film vault <span>{player.watchlist.length}</span></button>
         </nav>
         <div className="header-actions">
-          <button onClick={() => setModal("stats")} aria-label="Player statistics">↗</button>
-          <button onClick={() => setModal("how")} aria-label="How to play">?</button>
+          <button onClick={() => setModal("stats")} aria-label="Player statistics"><span aria-hidden="true">◎</span><small>Stats</small></button>
+          <button onClick={() => setModal("how")} aria-label="How to play"><span aria-hidden="true">?</span><small>How to play</small></button>
         </div>
       </header>
 
@@ -355,7 +379,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
       <section className="game-section" id="game">
         <div className="section-heading">
           <div><span className="section-number">01 / THE GAME</span><h2>Your seat is ready.</h2></div>
-          <p>Pick a format, choose an era, then read the film one clue at a time.</p>
+          <p>Pick a format, choose a decade or the full catalogue, then read the film one clue at a time.</p>
         </div>
 
         <div className="format-tabs" role="tablist" aria-label="Game format">
@@ -379,14 +403,14 @@ export default function GameExperience({ initialDate }: { initialDate: string })
           <div className="console-grid">
             <div className="play-panel">
               <div className="era-row">
-                <div><span className="micro-label">SELECT AN ERA</span><div className="era-tabs">{DECADES.map((item) => <button key={item} className={decade === item ? "active" : ""} onClick={() => startGame({ decade: item })}>{item}</button>)}</div></div>
+                <div><span className="micro-label">SELECT A FILM RANGE</span><div className="era-tabs">{ERAS.map((item) => <button key={item} className={decade === item ? "active" : ""} onClick={() => startGame({ decade: item })}>{item === "All" ? "All eras" : item}</button>)}</div></div>
                 <div className="live-score"><span>MAX SCORE</span><strong>{potentialScore.toLocaleString("en-IN")}</strong><small>− points with guesses & hints</small></div>
               </div>
 
               {revealedClues > 0 && (
                 <div className="clue-reel">
                   <div className="micro-label">DEVELOPED CLUES</div>
-                  <div className="clue-track">{clues.slice(0, revealedClues).map((clue, index) => <article key={clue.label}><span>0{index + 1} / {clue.label}</span><strong>{clue.value}</strong></article>)}</div>
+                  <div className="clue-track">{visibleClues.map((clue, index) => <article key={clue.label}><span>0{index + 1} / {clue.label}</span><strong>{clue.value}</strong></article>)}</div>
                 </div>
               )}
 
@@ -439,12 +463,12 @@ export default function GameExperience({ initialDate }: { initialDate: string })
               <section className="hint-card">
                 <span className="micro-label">PROJECTION BOOTH</span>
                 <h3>Need another frame?</h3>
-                <p>Develop a story, year, genre, filmmaker or lead clue. Each costs 110 points.</p>
-                <button onClick={revealHint} disabled={status !== "playing" || revealedClues >= clues.length}><span>✦</span> Reveal clue <small>{hintsUsed}/3 used</small></button>
+                <p>Develop the next useful film detail. Facts already revealed by exact matches are skipped.</p>
+                <button onClick={revealHint} disabled={!canRevealHint}><span>✦</span> Reveal clue <small>{hintsUsed}/{MAX_PAID_HINTS} used</small></button>
               </section>
               <section className="daily-card">
                 <div><span>DAILY CALL SHEET</span><strong>#{puzzleNumber(currentDate) - archiveOffset}</strong></div>
-                <dl><div><dt>Format</dt><dd>{config.name}</dd></div><div><dt>Era</dt><dd>{decade}</dd></div><div><dt>Difficulty</dt><dd>{answer.difficulty}</dd></div><div><dt>Resets</dt><dd>{countdown || "Midnight IST"}</dd></div></dl>
+                <dl><div><dt>Format</dt><dd>{config.name}</dd></div><div><dt>Range</dt><dd>{eraLabel(decade)}</dd></div><div><dt>Difficulty</dt><dd>{answer.difficulty}</dd></div><div><dt>Resets</dt><dd>{countdown || "Midnight IST"}</dd></div></dl>
               </section>
             </aside>
           </div>
@@ -462,13 +486,13 @@ export default function GameExperience({ initialDate }: { initialDate: string })
       </section>
 
       <footer className="site-footer">
-        <div className="footer-brand"><span className="brand-seal">చి</span><div><strong>CHITRAM</strong><small>Made for Telugu cinema people.</small></div></div>
+        <div className="footer-brand"><span className="brand-mark" aria-hidden="true"><i /><b>చి</b><i /></span><div><strong>CHITRAM</strong><small>Made for Telugu cinema people.</small></div></div>
         <p>From the first whistle to the final frame.</p>
         <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Back to top ↑</button>
       </footer>
 
       {modal && <div className="modal-backdrop" onMouseDown={() => setModal(null)}><section className={`modal modal-${modal}`} role="dialog" aria-modal="true" aria-labelledby="modal-title" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setModal(null)} aria-label="Close">×</button>
-        {modal === "how" && <><span className="modal-kicker">HOUSE RULES</span><h2 id="modal-title">Read the cinema.</h2><p className="modal-intro">Search any film from the selected era. Every guess compares six details with the mystery picture.</p><div className="rule-list"><div><i className="green" /><strong>Exact match</strong><span>You are on the money.</span></div><div><i className="amber" /><strong>Close connection</strong><span>Nearby year, shared genre or film family.</span></div><div><i /><strong>No connection</strong><span>Take the next guess in another direction.</span></div></div><p className="modal-note">Arrows point toward an earlier or later release. Hints cost points but never a guess.</p></>}
+        {modal === "how" && <><span className="modal-kicker">HOUSE RULES</span><h2 id="modal-title">Read the cinema.</h2><p className="modal-intro">Search any film from the selected range. Choose All eras to play across the complete 2000–2020s catalogue. Every guess compares six details with the mystery picture.</p><div className="rule-list"><div><i className="green" /><strong>Exact match</strong><span>You are on the money.</span></div><div><i className="amber" /><strong>Close connection</strong><span>Nearby year, shared genre or film family.</span></div><div><i /><strong>No connection</strong><span>Take the next guess in another direction.</span></div></div><p className="modal-note">Arrows point toward an earlier or later release. Paid hints skip facts your guesses have already revealed.</p></>}
         {modal === "stats" && <><span className="modal-kicker">YOUR BOX OFFICE</span><h2 id="modal-title">The numbers don&apos;t lie.</h2><div className="big-stats"><div><strong>{player.stats.played}</strong><span>PLAYED</span></div><div><strong>{player.stats.played ? Math.round(player.stats.wins / player.stats.played * 100) : 0}%</strong><span>WIN RATE</span></div><div><strong>{player.stats.streak}</strong><span>STREAK</span></div><div><strong>{player.stats.bestScore.toLocaleString("en-IN")}</strong><span>BEST</span></div></div><h3 className="modal-subhead">Guess distribution</h3><div className="distribution">{player.stats.distribution.map((value, index) => <div key={index}><span>{index + 1}</span><i style={{ width: `${Math.max(8, value / Math.max(1, ...player.stats.distribution) * 100)}%` }} /><strong>{value}</strong></div>)}</div><h3 className="modal-subhead">Achievements</h3><div className="achievement-grid">{achievements.map((achievement) => <div key={achievement.name} className={achievement.unlocked ? "unlocked" : ""}><span>{achievement.unlocked ? "✦" : "○"}</span><strong>{achievement.name}</strong><small>{achievement.detail}</small></div>)}</div></>}
         {modal === "archive" && <><span className="modal-kicker">SEVEN-DAY ARCHIVE</span><h2 id="modal-title">Rewind the reel.</h2><p className="modal-intro">Choose a previous daily puzzle. Archive plays use your currently selected game format and era.</p><div className="modal-archive">{Array.from({ length: 7 }).map((_, index) => <button key={index} onClick={() => { setModal(null); startGame({ mode: "archive", archiveOffset: index + 1 }); }}><span>{archiveLabel(currentDate, index + 1)}</span><strong>Puzzle #{puzzleNumber(currentDate) - index - 1}</strong><small>PLAY NOW →</small></button>)}</div></>}
         {modal === "vault" && <><span className="modal-kicker">MY FILM VAULT</span><h2 id="modal-title">Saved for interval.</h2><p className="modal-intro">Keep a personal list of films revealed during play. It stays on this device.</p>{player.watchlist.length ? <div className="vault-grid">{player.watchlist.map((id) => ALL_MOVIES.find((movie) => movie.id === id)).filter((movie): movie is Movie => Boolean(movie)).map((movie) => <article key={movie.id}><div className="vault-poster"><span>{movie.year}</span><strong>{movie.title.slice(0, 1)}</strong></div><div><strong>{movie.title}</strong><small>{movie.director}</small><button onClick={() => toggleVault(movie)}>Remove</button></div></article>)}</div> : <div className="empty-vault"><span>◎</span><strong>No films saved yet.</strong><p>Finish a game and add the reveal to your vault.</p></div>}</>}
