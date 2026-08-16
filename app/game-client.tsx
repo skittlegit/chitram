@@ -196,6 +196,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   const [toast, setToast] = useState("");
   const [undoMovie, setUndoMovie] = useState<Movie | null>(null);
   const [pendingGame, setPendingGame] = useState<GameSelection | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeSection, setActiveSection] = useState("top");
   const resultRef = useRef<HTMLDivElement>(null);
   const player = useSyncExternalStore(subscribeToPlayer, getPlayerSnapshot, () => DEFAULT_PLAYER);
@@ -472,15 +473,6 @@ export default function GameExperience({ initialDate }: { initialDate: string })
         </div>
       </section>
 
-      <section className="quick-guide section-target" id="how" tabIndex={-1}>
-        <div className="guide-heading"><span>How to play</span><h2>Three simple steps.</h2></div>
-        <div className="guide-grid">
-          <article><span>1</span><div><strong>Choose your game</strong><p>Play today&apos;s movie or practise from any decade.</p></div></article>
-          <article><span>2</span><div><strong>Search and guess</strong><p>Pick a Telugu film from the catalogue. Every guess gives you more information.</p></div></article>
-          <article><span>3</span><div><strong>Follow the colours</strong><p><i className="key exact" /> Exact match <i className="key close" /> Close <i className="key miss" /> Not a match</p></div></article>
-        </div>
-      </section>
-
       <section className="game-section section-target" id="game" tabIndex={-1}>
         <div className="section-heading">
           <div><span className="section-kicker">Play</span><h2>Guess the movie.</h2></div>
@@ -489,7 +481,11 @@ export default function GameExperience({ initialDate }: { initialDate: string })
 
         <div className="game-shell">
           {pendingGame && <div className="restart-notice" role="alert"><div><strong>Start a different game?</strong><span>Your current guesses will be cleared.</span></div><div><button type="button" onClick={() => applyGame(pendingGame)}>Start new game</button><button type="button" className="secondary" onClick={() => setPendingGame(null)}>Keep playing</button></div></div>}
-          <div className="game-setup">
+          <button className="settings-summary" type="button" aria-controls="game-settings" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((value) => !value)}>
+            <span><small>Game setup</small><strong>{config.name} · {mode === "practice" ? "Practice" : mode === "archive" ? "Archive" : "Daily"} · {eraLabel(decade)}</strong></span>
+            <span aria-hidden="true">{settingsOpen ? "Close −" : "Change +"}</span>
+          </button>
+          <div className={`game-setup ${settingsOpen ? "open" : ""}`} id="game-settings">
             <fieldset>
               <legend>Game style</legend>
               <div className="setup-options format-options">
@@ -560,6 +556,15 @@ export default function GameExperience({ initialDate }: { initialDate: string })
               })}</div>}
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="quick-guide section-target" id="how" tabIndex={-1}>
+        <div className="guide-heading"><span>How to play</span><h2>Three simple steps.</h2></div>
+        <div className="guide-grid">
+          <article><span>1</span><div><strong>Choose your game</strong><p>Play today&apos;s movie or practise from any decade.</p></div></article>
+          <article><span>2</span><div><strong>Search and guess</strong><p>Pick a Telugu film from the catalogue. Every guess gives you more information.</p></div></article>
+          <article><span>3</span><div><strong>Follow the colours</strong><p><i className="key exact" /> Exact match <i className="key close" /> Close <i className="key miss" /> Not a match</p></div></article>
         </div>
       </section>
 
