@@ -1,15 +1,18 @@
 import type { Metadata } from "next";
-import { Bodoni_Moda, Manrope } from "next/font/google";
+import { Anek_Telugu, Yatra_One } from "next/font/google";
 import "./globals.css";
 
-const manrope = Manrope({
+const anek = Anek_Telugu({
   variable: "--font-sans",
-  subsets: ["latin"],
+  subsets: ["latin", "telugu"],
+  weight: "variable",
+  axes: ["wdth"],
 });
 
-const bodoni = Bodoni_Moda({
-  variable: "--font-display",
+const yatra = Yatra_One({
+  variable: "--font-wordmark",
   subsets: ["latin"],
+  weight: "400",
 });
 
 const siteUrl =
@@ -44,7 +47,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${manrope.variable} ${bodoni.variable} antialiased`}
+        className={`${anek.variable} ${yatra.variable}`}
       >
         {children}
       </body>

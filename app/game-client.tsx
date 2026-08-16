@@ -239,6 +239,18 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (!id) return;
+    const timer = window.setTimeout(() => {
+      const target = document.getElementById(id);
+      if (!target) return;
+      target.scrollIntoView({ behavior: "auto", block: "start" });
+      setActiveSection(id);
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const pool = moviesForEra(decade);
   const config = gameConfig(gameType);
   const answer = useMemo(() => {
@@ -256,7 +268,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
       .filter((movie) => !guesses.some((guess) => guess.id === movie.id))
       .filter((movie) => [movie.title, ...(movie.aliases || [])].some((name) => normalize(name).includes(normalizedQuery)))
       .sort((a, b) => Number(normalize(b.title).startsWith(normalizedQuery)) - Number(normalize(a.title).startsWith(normalizedQuery)))
-      .slice(0, 6);
+      .slice(0, 3);
   }, [guesses, normalizedQuery, pool]);
 
   const clues: { label: string; value: string; field?: ClueField }[] = [
@@ -432,12 +444,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
 
       <header className="topbar">
         <div className="topbar-inner">
-          <a className="brand" href="#top" aria-label="Chitram home">
-            <span className="logo-mark" aria-hidden="true">
-              <svg viewBox="0 0 44 44" focusable="false"><path d="M8 15h28v21H8z" /><path d="m9 15 5-7h8l-5 7m8 0 5-7h5l1 7" /><path d="m18 21 10 6-10 6z" /></svg>
-            </span>
-            <span className="brand-copy"><strong>Chitram</strong><small>Telugu movie game</small></span>
-          </a>
+          <a className="brand wordmark" href="#top" aria-label="Chitram home">Chitram</a>
           <nav className="main-nav" aria-label="Main navigation">
             <a className={activeSection === "game" ? "nav-primary" : ""} aria-current={activeSection === "game" ? "location" : undefined} href="#game" onClick={() => setActiveSection("game")}>Play</a>
             <a className={activeSection === "how" ? "nav-primary" : ""} aria-current={activeSection === "how" ? "location" : undefined} href="#how" onClick={() => setActiveSection("how")}>How it works</a>
@@ -452,30 +459,32 @@ export default function GameExperience({ initialDate }: { initialDate: string })
 
       <section className="hero">
         <div className="hero-copy">
-          <div className="eyebrow"><span>Today&apos;s game</span> Puzzle #{puzzleNumber(currentDate)}</div>
-          <h1>How well do you know <em>Telugu cinema?</em></h1>
-          <p>Guess the mystery movie using its year, cast, director and genre. You get six tries, and there is a new film every day.</p>
+          <div className="eyebrow"><span lang="te">తెలుగు సినిమా</span> Daily movie game · #{puzzleNumber(currentDate)}</div>
+          <h1>Guess the film <em>before the interval.</em></h1>
+          <p>One mystery Telugu movie. Use its year, cast, director and genre to name it in six guesses.</p>
           <div className="hero-actions">
-            <a className="primary-cta" href="#game">Play today&apos;s movie <span>→</span></a>
-            <button className="secondary-cta" onClick={() => startGame({ mode: "practice" }, true)}>Practice without limits</button>
+            <a className="primary-cta" href="#game">Start today&apos;s show <span>→</span></a>
+            <button className="secondary-cta" onClick={() => startGame({ mode: "practice" }, true)}>Play an unlimited practice show</button>
           </div>
           <div className="hero-facts">
-            <span><strong>{ALL_MOVIES.length}</strong> movies</span>
+            <span><strong>{ALL_MOVIES.length}</strong> films in the reel</span>
             <span><strong>2000–2025</strong> releases</span>
-            <span><strong>Free</strong> to play</span>
+            <span><strong>Midnight IST</strong> new show</span>
           </div>
         </div>
-        <div className="hero-visual" role="img" aria-label="A cinema auditorium ready for a Telugu film">
-          <div className="hero-show-card">
-            <div><span>Now playing</span><strong>Mystery Movie</strong></div>
-            <div><span>Next movie in</span><NextMovieCountdown /></div>
+        <div className="hero-poster" role="img" aria-label="A typographic poster for today's mystery Telugu movie">
+          <div className="poster-band"><span>First day</span><span>First show</span></div>
+          <div className="poster-title"><small>Today&apos;s mystery</small><strong>సినిమా?</strong></div>
+          <div className="poster-billing"><span>1 film</span><span>6 clues</span><span>{config.maxGuesses} guesses</span></div>
+          <div className="poster-showtime">
+            <span>Next show</span><NextMovieCountdown />
           </div>
         </div>
       </section>
 
       <section className="game-section section-target" id="game" tabIndex={-1}>
         <div className="section-heading">
-          <div><span className="section-kicker">Play</span><h2>Guess the movie.</h2></div>
+          <div><span className="section-kicker">Today&apos;s show</span><h2>Which Chitram is it?</h2></div>
           <p>{modeLabel}. {config.description}</p>
         </div>
 
@@ -489,7 +498,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
             <fieldset>
               <legend>Game style</legend>
               <div className="setup-options format-options">
-                {GAME_TYPES.map((game) => <button type="button" key={game.id} aria-pressed={gameType === game.id} className={gameType === game.id ? "active" : ""} onClick={() => startGame({ gameType: game.id })}><strong>{game.name}</strong><small>{game.maxGuesses} guesses</small></button>)}
+                {GAME_TYPES.map((game) => <button type="button" key={game.id} aria-pressed={gameType === game.id} className={gameType === game.id ? "active" : ""} onClick={() => startGame({ gameType: game.id })}><strong>{game.id === "classic" ? "Classic" : game.id === "rush" ? "First Show" : game.name}</strong><small>{game.maxGuesses} guesses</small></button>)}
               </div>
             </fieldset>
             <fieldset>
@@ -502,7 +511,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
             <fieldset>
               <legend>Movies from</legend>
               <div className="setup-options era-options">
-                {ERAS.map((item) => <button type="button" key={item} aria-pressed={decade === item} className={decade === item ? "active" : ""} onClick={() => startGame({ decade: item })}>{item === "All" ? "All years" : item}</button>)}
+                {ERAS.map((item) => <button type="button" key={item} aria-pressed={decade === item} className={decade === item ? "active" : ""} onClick={() => startGame({ decade: item })}>{item === "All" ? "All" : item}</button>)}
               </div>
             </fieldset>
           </div>
@@ -513,7 +522,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
               <div className="take-pips" aria-label={`${guesses.length} of ${config.maxGuesses} guesses used`}>{Array.from({ length: config.maxGuesses }).map((_, index) => <i key={index} className={index < guesses.length ? (guesses[index].id === answer.id ? "won" : "used") : ""} />)}</div>
             </div>
             <div className="score-summary"><span>Possible score</span><strong>{potentialScore.toLocaleString("en-IN")}</strong></div>
-            <button className="hint-button" onClick={revealHint} disabled={!canRevealHint}><span>✦</span><strong>Reveal a clue</strong><small>{hintsUsed}/{MAX_PAID_HINTS} used</small></button>
+            <button className="hint-button" onClick={revealHint} disabled={!canRevealHint}><strong>Show a clue</strong><small>{hintsUsed}/{MAX_PAID_HINTS} opened</small></button>
           </div>
 
           {revealedClues > 0 && <div className="clue-reel"><span className="content-label">Clues</span><div className="clue-track">{visibleClues.map((clue) => <article key={clue.label}><span>{clue.label}</span><strong>{clue.value}</strong></article>)}</div></div>}
@@ -521,9 +530,13 @@ export default function GameExperience({ initialDate }: { initialDate: string })
           <div className="play-area">
             {status === "playing" ? (
               <form className="search-area" onSubmit={(event) => submit(event)}>
-                <label htmlFor="film-search">Search for your next guess</label>
+                <div className="search-heading"><label htmlFor="film-search">Your next guess</label><span>Search the Telugu film catalogue</span></div>
+                {guesses.length > 0 && <div className="guess-memory" aria-label={`${guesses.length} previous guesses`}>
+                  <div><span>On your slate</span><small>{guesses.length}/{config.maxGuesses}</small></div>
+                  <ol>{guesses.map((guess, index) => <li key={guess.id}><span>{index + 1}</span><strong>{guess.title}</strong><small>{guess.year}</small></li>)}</ol>
+                </div>}
                 <div className="search-box">
-                  <span aria-hidden="true">⌕</span>
+                  <span aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="10.5" cy="10.5" r="5.75" /><path d="m15 15 4.25 4.25" /></svg></span>
                   <input id="film-search" role="combobox" value={query} onChange={(event) => { setQuery(event.target.value); setHighlight(-1); setToast(""); }} onKeyDown={onSearchKeyDown} aria-autocomplete="list" aria-controls="film-suggestions" aria-expanded={suggestions.length > 0} aria-activedescendant={highlight >= 0 && suggestions[highlight] ? `film-option-${suggestions[highlight].id}` : undefined} autoComplete="off" placeholder="Type a movie title" />
                   <button type="submit">Guess</button>
                 </div>
@@ -560,24 +573,24 @@ export default function GameExperience({ initialDate }: { initialDate: string })
       </section>
 
       <section className="quick-guide section-target" id="how" tabIndex={-1}>
-        <div className="guide-heading"><span>How to play</span><h2>Three simple steps.</h2></div>
+        <div className="guide-heading"><span>How it plays</span><h2>Read the signals.</h2></div>
         <div className="guide-grid">
-          <article><span>1</span><div><strong>Choose your game</strong><p>Play today&apos;s movie or practise from any decade.</p></div></article>
-          <article><span>2</span><div><strong>Search and guess</strong><p>Pick a Telugu film from the catalogue. Every guess gives you more information.</p></div></article>
-          <article><span>3</span><div><strong>Follow the colours</strong><p><i className="key exact" /> Exact match <i className="key close" /> Close <i className="key miss" /> Not a match</p></div></article>
+          <article><span>01</span><div><strong>Put a film on the slate</strong><p>Start with any Telugu movie you know.</p></div></article>
+          <article><span>02</span><div><strong>Read every reveal</strong><p>Year, lead, director and genre narrow the mystery.</p></div></article>
+          <article><span>03</span><div><strong>Follow the print colours</strong><p><i className="key exact" /> Exact <i className="key close" /> Close <i className="key miss" /> Miss</p></div></article>
         </div>
       </section>
 
       <section className="library-section section-target" tabIndex={-1}>
-        <div className="section-heading"><div><span className="section-kicker">Your Chitram</span><h2>Come back anytime.</h2></div><p>Replay a recent puzzle, check your progress, or revisit movies you saved.</p></div>
+        <div className="section-heading"><div><span className="section-kicker">After the show</span><h2>Your box office.</h2></div><p>Replay a previous show, check your scorecard, or return to movies you saved.</p></div>
         <div className="utility-grid">
           <section className="utility-card archive-card section-target" id="archive" tabIndex={-1}>
-            <div className="utility-heading"><div><span>Past puzzles</span><h3>Play the last seven days</h3></div><small>Archive games do not affect your streak.</small></div>
+            <div className="utility-heading"><div><span>Previous shows</span><h3>Seven days on the reel</h3></div><small>Archive games do not affect your streak.</small></div>
             <div className="archive-list">{Array.from({ length: 7 }).map((_, index) => <button key={index} onClick={() => startGame({ mode: "archive", archiveOffset: index + 1 })}><span>{archiveLabel(currentDate, index + 1)}</span><strong>#{puzzleNumber(currentDate) - index - 1}</strong><small>Play →</small></button>)}</div>
           </section>
 
           <section className="utility-card progress-card section-target" id="progress" tabIndex={-1}>
-            <div className="utility-heading"><div><span>Your progress</span><h3>At a glance</h3></div></div>
+            <div className="utility-heading"><div><span>Scorecard</span><h3>Your box office</h3></div></div>
             <div className="stats-grid">
               <div><strong>{player.stats.played}</strong><span>Played</span></div>
               <div><strong>{player.stats.played ? Math.round(player.stats.wins / player.stats.played * 100) : 0}%</strong><span>Win rate</span></div>
@@ -587,14 +600,14 @@ export default function GameExperience({ initialDate }: { initialDate: string })
           </section>
 
           <section className="utility-card vault-card section-target" id="vault" tabIndex={-1}>
-            <div className="utility-heading"><div><span>Saved movies</span><h3>Your film list</h3></div><small>Saved only on this device.</small></div>
+            <div className="utility-heading"><div><span>Watchlist</span><h3>Films for later</h3></div><small>Saved only on this device.</small></div>
             {savedMovies.length ? <div className="vault-grid">{savedMovies.map((movie) => <article key={movie.id}><MoviePoster movie={movie} className="vault-poster" /><div><strong>{movie.title}</strong><small>{movie.year} · {movie.director}</small><button type="button" onClick={() => toggleVault(movie)}>Remove</button></div></article>)}</div> : <div className="empty-vault"><strong>No saved movies yet</strong><p>Finish a game and choose “Save movie” to build your list.</p></div>}
           </section>
         </div>
       </section>
 
       <footer className="site-footer">
-        <div className="footer-main"><span className="logo-mark" aria-hidden="true"><svg viewBox="0 0 44 44" focusable="false"><path d="M8 15h28v21H8z" /><path d="m9 15 5-7h8l-5 7m8 0 5-7h5l1 7" /><path d="m18 21 10 6-10 6z" /></svg></span><div><strong>Chitram</strong><small>A Telugu movie guessing game.</small></div></div>
+        <div className="footer-main"><strong className="wordmark">Chitram</strong><small>A Telugu movie guessing game.</small></div>
         <a className="tmdb-credit" href="https://www.themoviedb.org" target="_blank" rel="noreferrer"><span className="tmdb-logo" aria-hidden="true" /><small>This product uses the TMDB API but is not endorsed or certified by TMDB.</small></a>
         <a className="back-to-top" href="#top">Back to top ↑</a>
       </footer>
