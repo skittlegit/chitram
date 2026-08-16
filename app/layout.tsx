@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Anek_Telugu, Yatra_One } from "next/font/google";
 import "./globals.css";
 
@@ -23,8 +23,13 @@ const siteUrl =
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: "Chitram — The Telugu Cinema Guessing Game",
+  title: { default: "Chitram — The Telugu Cinema Guessing Game", template: "%s | Chitram" },
   description: "Guess a Telugu film with Easy, Medium, or Hard clues, build your streak, and explore previous daily games.",
+  applicationName: "Chitram",
+  alternates: { canonical: "/" },
+  category: "game",
+  keywords: ["Telugu movies", "Tollywood", "movie guessing game", "daily game", "Telugu cinema"],
+  formatDetection: { telephone: false },
   openGraph: {
     title: "Chitram — The Telugu Cinema Guessing Game",
     description: "Choose your clue level. One mystery Telugu film.",
@@ -37,6 +42,13 @@ export const metadata: Metadata = {
     description: "Choose your clue level. One mystery Telugu film.",
     images: ["/og.png"],
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  colorScheme: "light",
+  themeColor: "#f3e6c8",
 };
 
 export default function RootLayout({

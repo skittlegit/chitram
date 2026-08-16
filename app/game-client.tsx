@@ -121,9 +121,9 @@ function resultEmoji(guess: Movie, answer: Movie) {
     .join("");
 }
 
-function scoreFor(difficulty: Difficulty, guesses: number) {
+function scoreFor(difficulty: Difficulty, guesses: number, cluesUsed: number) {
   const config = difficultyConfig(difficulty);
-  return Math.max(100, config.baseScore - Math.max(0, guesses - 1) * config.guessPenalty);
+  return Math.max(100, config.baseScore - Math.max(0, guesses - 1) * config.guessPenalty - cluesUsed * config.cluePenalty);
 }
 
 function nextPuzzleCountdown() {
@@ -190,6 +190,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   const [guesses, setGuesses] = useState<Movie[]>([]);
   const [status, setStatus] = useState<"playing" | "won" | "lost">("playing");
   const [highlight, setHighlight] = useState(-1);
+  const [revealedClueLabels, setRevealedClueLabels] = useState<string[]>([]);
   const [finalScore, setFinalScore] = useState(0);
   const [toast, setToast] = useState("");
   const [undoMovie, setUndoMovie] = useState<Movie | null>(null);
@@ -277,8 +278,16 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     { label: "The filmmaker", value: answer.director, field: "director" },
     { label: "Lead billing", value: answer.hero, field: "hero" },
   ];
-  const visibleClues = clues.slice(0, config.startingClues);
-  const potentialScore = scoreFor(difficulty, Math.max(1, guesses.length + 1));
+  const knownClueFields = new Set<ClueField>(
+    (["year", "genres", "director", "hero", "lane"] as ClueField[]).filter((field) =>
+      guesses.some((guess) => getResult(field, guess, answer) === "match"),
+    ),
+  );
+  const visibleClues = clues.filter((clue) => revealedClueLabels.includes(clue.label));
+  const availableClues = clues.filter((clue) => !revealedClueLabels.includes(clue.label) && (!clue.field || !knownClueFields.has(clue.field)));
+  const cluesRemaining = Math.max(0, config.maxClues - revealedClueLabels.length);
+  const canRevealClue = status === "playing" && cluesRemaining > 0 && availableClues.length > 0;
+  const potentialScore = scoreFor(difficulty, Math.max(1, guesses.length + 1), revealedClueLabels.length);
   const guessesLeft = config.maxGuesses - guesses.length;
 
   function resetBoard() {
@@ -286,6 +295,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     setGuesses([]);
     setStatus("playing");
     setHighlight(-1);
+    setRevealedClueLabels([]);
     setFinalScore(0);
     setToast("");
   }
@@ -360,7 +370,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     setHighlight(-1);
     setToast("");
     if (movie.id === answer.id) {
-      const score = scoreFor(difficulty, nextGuesses.length);
+      const score = scoreFor(difficulty, nextGuesses.length, revealedClueLabels.length);
       setStatus("won");
       setFinalScore(score);
       recordResult(true, nextGuesses.length, score);
@@ -386,6 +396,24 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     }
   }
 
+  function revealClue() {
+    if (config.maxClues === 0) {
+      setToast("Hard mode has no clues.");
+      return;
+    }
+    if (cluesRemaining === 0) {
+      setToast(`You have used all ${config.maxClues} clues.`);
+      return;
+    }
+    const nextClue = availableClues[0];
+    if (!nextClue) {
+      setToast("Your guesses already revealed every useful clue.");
+      return;
+    }
+    setRevealedClueLabels((current) => [...current, nextClue.label]);
+    setToast(`${nextClue.label} revealed. −${config.cluePenalty} points.`);
+  }
+
   function toggleVault(movie: Movie) {
     const exists = player.watchlist.includes(movie.id);
     savePlayer({ ...player, watchlist: exists ? player.watchlist.filter((id) => id !== movie.id) : [...player.watchlist, movie.id] });
@@ -402,7 +430,8 @@ export default function GameExperience({ initialDate }: { initialDate: string })
 
   async function share() {
     const gameName = config.name;
-    const text = `Chitram #${puzzleNumber(currentDate) - archiveOffset} · ${gameName} · ${eraLabel(decade)}\n${guesses.map((guess) => resultEmoji(guess, answer)).join("\n")}\n${status === "won" ? `${guesses.length}/${config.maxGuesses} · ${finalScore} pts` : `X/${config.maxGuesses}`} · chitram.game`;
+    const clueCount = `${revealedClueLabels.length} ${revealedClueLabels.length === 1 ? "clue" : "clues"}`;
+    const text = `Chitram #${puzzleNumber(currentDate) - archiveOffset} · ${gameName} · ${eraLabel(decade)}\n${guesses.map((guess) => resultEmoji(guess, answer)).join("\n")}\n${status === "won" ? `${guesses.length}/${config.maxGuesses} · ${clueCount} · ${finalScore} pts` : `X/${config.maxGuesses}`} · chitram.game`;
     try {
       await navigator.clipboard.writeText(text);
       setToast("Result copied. Send it to the group chat.");
@@ -418,6 +447,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
 
   return (
     <main id="top" className="site">
+      <a className="skip-link" href="#game">Skip to the game</a>
       {toast && <div className="global-toast" role="status" aria-live="polite"><span>{toast}</span>{undoMovie && <button type="button" onClick={undoVaultRemoval}>Undo</button>}</div>}
 
       <header className="topbar">
@@ -439,7 +469,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
         <div className="hero-copy">
           <div className="eyebrow"><span lang="te">తెలుగు సినిమా</span> Daily movie game · #{puzzleNumber(currentDate)}</div>
           <h1>Guess the film <em>before the interval.</em></h1>
-          <p>One mystery Telugu movie. Choose how many clues you want, then use every comparison to find it.</p>
+          <p>One mystery Telugu movie. Request a clue only when you need one, then use every comparison to find it.</p>
           <div className="hero-actions">
             <a className="primary-cta" href="#game">Start today&apos;s show <span>→</span></a>
             <button className="secondary-cta" onClick={() => startGame({ mode: "practice" }, true)}>Play an unlimited practice show</button>
@@ -453,7 +483,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
         <div className="hero-poster" role="img" aria-label="A typographic poster for today's mystery Telugu movie">
           <div className="poster-band"><span>First day</span><span>First show</span></div>
           <div className="poster-title"><small>Today&apos;s mystery</small><strong>సినిమా?</strong></div>
-          <div className="poster-billing"><span>{config.name}</span><span>{config.startingClues || "No"} clues</span><span>{config.maxGuesses} guesses</span></div>
+          <div className="poster-billing"><span>{config.name}</span><span>{config.maxClues || "No"} clues</span><span>{config.maxGuesses} guesses</span></div>
           <div className="poster-showtime">
             <span>Next show</span><NextMovieCountdown />
           </div>
@@ -476,7 +506,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
             <fieldset>
               <legend>Difficulty</legend>
               <div className="setup-options difficulty-options">
-                {DIFFICULTIES.map((item) => <button type="button" key={item.id} aria-pressed={difficulty === item.id} className={difficulty === item.id ? "active" : ""} onClick={() => startGame({ difficulty: item.id })}><strong>{item.name}<span>{item.baseScore.toLocaleString("en-IN")} pts</span></strong><small>{item.startingClues ? `${item.startingClues} clues` : "No clues"} · {item.maxGuesses} guesses</small></button>)}
+                {DIFFICULTIES.map((item) => <button type="button" key={item.id} aria-pressed={difficulty === item.id} className={difficulty === item.id ? "active" : ""} onClick={() => startGame({ difficulty: item.id })}><strong>{item.name}<span>{item.baseScore.toLocaleString("en-IN")} pts</span></strong><small>{item.maxClues ? `Up to ${item.maxClues} clues` : "No clues"} · {item.maxGuesses} guesses</small></button>)}
               </div>
             </fieldset>
             <fieldset>
@@ -500,9 +530,13 @@ export default function GameExperience({ initialDate }: { initialDate: string })
               <div className="take-pips" aria-label={`${guesses.length} of ${config.maxGuesses} guesses used`}>{Array.from({ length: config.maxGuesses }).map((_, index) => <i key={index} className={index < guesses.length ? (guesses[index].id === answer.id ? "won" : "used") : ""} />)}</div>
             </div>
             <div className="score-summary"><span>Score now</span><strong>{potentialScore.toLocaleString("en-IN")}</strong></div>
+            <button className="clue-button" type="button" onClick={revealClue} disabled={!canRevealClue}>
+              <strong>{config.maxClues === 0 ? "No clues" : cluesRemaining === 0 ? "Clues used" : availableClues.length === 0 ? "No useful clues" : "Get a clue"}</strong>
+              <small>{config.maxClues === 0 ? "Hard mode" : cluesRemaining === 0 ? "All clues used" : availableClues.length === 0 ? "Already covered by your guesses" : `${cluesRemaining} remaining · −${config.cluePenalty} pts`}</small>
+            </button>
           </div>
 
-          {visibleClues.length > 0 && <div className="clue-reel"><span className="content-label">Your {config.name.toLowerCase()} clues</span><div className="clue-track">{visibleClues.map((clue) => <article key={clue.label}><span>{clue.label}</span><strong>{clue.value}</strong></article>)}</div></div>}
+          {visibleClues.length > 0 && <div className="clue-reel"><span className="content-label">Clues you requested</span><div className="clue-track">{visibleClues.map((clue) => <article key={clue.label}><span>{clue.label}</span><strong>{clue.value}</strong></article>)}</div></div>}
 
           <div className="play-area">
             {status === "playing" ? (
@@ -552,7 +586,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
       <section className="quick-guide section-target" id="how" tabIndex={-1}>
         <div className="guide-heading"><span>How it plays</span><h2>Read the signals.</h2></div>
         <div className="guide-grid">
-          <article><span>01</span><div><strong>Choose your difficulty</strong><p>Easy gives 3 clues, Medium 2, and Hard none.</p></div></article>
+          <article><span>01</span><div><strong>Choose your difficulty</strong><p>Request up to 3 clues on Easy, 2 on Medium, or none on Hard.</p></div></article>
           <article><span>02</span><div><strong>Put a film on the slate</strong><p>Search any Telugu movie, then compare every reveal.</p></div></article>
           <article><span>03</span><div><strong>Follow the print colours</strong><p><i className="key exact" /> Exact <i className="key close" /> Close <i className="key miss" /> Miss</p></div></article>
         </div>

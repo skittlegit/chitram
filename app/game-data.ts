@@ -25,14 +25,15 @@ export const DIFFICULTIES: Array<{
   id: Difficulty;
   name: string;
   description: string;
-  startingClues: number;
+  maxClues: number;
   maxGuesses: number;
   baseScore: number;
   guessPenalty: number;
+  cluePenalty: number;
 }> = [
-  { id: "easy", name: "Easy", description: "Three clues and eight guesses. Best for a relaxed game.", startingClues: 3, maxGuesses: 8, baseScore: 600, guessPenalty: 50 },
-  { id: "medium", name: "Medium", description: "Two clues and six guesses. A balanced daily challenge.", startingClues: 2, maxGuesses: 6, baseScore: 900, guessPenalty: 75 },
-  { id: "hard", name: "Hard", description: "No starting clues and five guesses. Every comparison matters.", startingClues: 0, maxGuesses: 5, baseScore: 1200, guessPenalty: 100 },
+  { id: "easy", name: "Easy", description: "Request up to three clues whenever you need them. Eight guesses total.", maxClues: 3, maxGuesses: 8, baseScore: 600, guessPenalty: 50, cluePenalty: 50 },
+  { id: "medium", name: "Medium", description: "Request up to two clues whenever you need them. Six guesses total.", maxClues: 2, maxGuesses: 6, baseScore: 900, guessPenalty: 75, cluePenalty: 100 },
+  { id: "hard", name: "Hard", description: "No clues. Five guesses, so every comparison matters.", maxClues: 0, maxGuesses: 5, baseScore: 1200, guessPenalty: 100, cluePenalty: 0 },
 ];
 
 export const MOVIES: Record<Decade, Movie[]> = {
