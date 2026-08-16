@@ -69,9 +69,9 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 .hero-facts strong { color: var(--ink); font-weight: 800; }
 .hero-poster { width: min(420px, 100%); aspect-ratio: 4 / 5; justify-self: end; display: grid; grid-template-rows: auto 1fr auto auto; color: var(--paper-bright); border: 3px solid var(--line); background: var(--brand); box-shadow: 9px 9px 0 var(--line); transform: rotate(1deg); }
 .poster-band { min-height: 48px; padding: 0 15px; display: flex; align-items: center; justify-content: space-between; color: var(--ink); border-bottom: 3px solid var(--line); background: var(--marigold); font-size: .78rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-.poster-title { padding: 28px 22px; display: flex; flex-direction: column; justify-content: center; }
-.poster-title small { font-size: .8rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
-.poster-title strong { margin-top: 12px; font-size: clamp(68px, 8vw, 104px); line-height: .85; font-weight: 800; font-stretch: 75%; letter-spacing: -.06em; }
+.poster-title { padding: 28px 22px; display: flex; flex-direction: column; justify-content: center; gap: 40px; }
+.poster-title small { position: relative; z-index: 1; display: block; width: fit-content; font-size: .8rem; font-weight: 800; line-height: 1; letter-spacing: .14em; text-transform: uppercase; }
+.poster-title strong { display: block; margin: 0; font-size: clamp(68px, 8vw, 104px); line-height: .9; font-weight: 800; font-stretch: 75%; letter-spacing: -.06em; }
 .poster-billing { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 3px solid var(--line); border-bottom: 3px solid var(--line); background: var(--paper-bright); }
 .poster-billing span { min-height: 54px; padding: 8px; display: grid; place-items: center; color: var(--ink); border-right: 1px solid var(--line); font-size: .75rem; font-weight: 800; text-align: center; text-transform: uppercase; }
 .poster-billing span:last-child { border-right: 0; }
@@ -304,8 +304,8 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
   .hero-facts span:last-child { grid-column: 1 / -1; border-bottom: 0; }
   .hero-poster { width: calc(100% - 10px); max-width: none; aspect-ratio: 16 / 10; align-self: flex-start; grid-template-rows: auto 1fr auto auto; box-shadow: 7px 7px 0 var(--line); transform: rotate(.5deg); }
   .poster-band { min-height: 38px; }
-  .poster-title { padding: 18px; }
-  .poster-title strong { margin-top: 6px; font-size: 54px; }
+  .poster-title { padding: 18px; gap: 28px; }
+  .poster-title strong { font-size: 54px; }
   .poster-billing span { min-height: 40px; padding: 5px; }
   .poster-showtime { min-height: 48px; }
   .poster-showtime strong { font-size: 1rem; }
