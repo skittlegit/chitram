@@ -24,17 +24,17 @@ const siteUrl =
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "Chitram — The Telugu Cinema Guessing Game",
-  description: "Guess Telugu films across three cinematic game formats, build your streak, explore the archive, and prove your Tollywood knowledge.",
+  description: "Guess a Telugu film with Easy, Medium, or Hard clues, build your streak, and explore previous daily games.",
   openGraph: {
     title: "Chitram — The Telugu Cinema Guessing Game",
-    description: "Three game formats. Six cinematic clues. One mystery Telugu film.",
+    description: "Choose your clue level. One mystery Telugu film.",
     type: "website",
     images: [{ url: "/og.png", width: 1730, height: 907, alt: "Chitram Telugu movie guessing game" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "Chitram — The Telugu Cinema Guessing Game",
-    description: "Three game formats. Six cinematic clues. One mystery Telugu film.",
+    description: "Choose your clue level. One mystery Telugu film.",
     images: ["/og.png"],
   },
 };

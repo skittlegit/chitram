@@ -30,10 +30,6 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 .section-target:focus { outline: none; }
 
 .site { --accent: var(--marigold); min-height: 100vh; background: var(--paper); }
-.era-2000s { --accent: #e4a52a; }
-.era-2010s { --accent: #cf553b; }
-.era-2020s { --accent: #3f8d80; }
-.era-all { --accent: var(--marigold); }
 .wordmark { font-family: var(--font-wordmark), serif; font-weight: 400; letter-spacing: -.055em; }
 
 /* Header */
@@ -57,7 +53,7 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 .hero h1 em { color: var(--brand); font-style: normal; }
 .hero-copy > p { max-width: 590px; margin: 0; color: var(--muted); font-size: 1.08rem; line-height: 1.6; }
 .hero-actions { margin-top: 28px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.primary-cta, .secondary-cta, .setup-options button, .hint-button, .search-box button, .result-buttons button, .restart-notice button, .global-toast button { min-height: var(--control-h); border: 2px solid var(--line); border-radius: 2px; font-size: .875rem; font-weight: 750; cursor: pointer; }
+.primary-cta, .secondary-cta, .setup-options button, .search-box button, .result-buttons button, .restart-notice button, .global-toast button { min-height: var(--control-h); border: 2px solid var(--line); border-radius: 2px; font-size: .875rem; font-weight: 750; cursor: pointer; }
 .primary-cta, .secondary-cta { padding: 0 18px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 .primary-cta { color: var(--paper-bright); border-color: var(--brand-dark); background: var(--brand); }
 .primary-cta span { margin-left: 24px; font-size: 1rem; }
@@ -107,10 +103,11 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 .setup-options button { height: var(--control-h); min-width: 0; padding: 0 12px; color: var(--ink); background: var(--paper-bright); }
 .setup-options button:hover { background: #f8e0a7; }
 .setup-options button.active { color: var(--ink); background: var(--accent); }
-.format-options button { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; }
-.format-options strong { min-width: 0; overflow: hidden; font-size: .875rem; text-overflow: ellipsis; white-space: nowrap; }
-.format-options small { flex: 0 0 auto; color: var(--muted); font-size: .75rem; }
-.game-statusbar { min-height: 78px; padding: 12px 16px; display: grid; grid-template-columns: 1fr auto auto; gap: 24px; align-items: center; border-bottom: 2px solid var(--line); background: var(--marigold); }
+.difficulty-options button { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; text-align: left; }
+.difficulty-options strong { width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 6px; font-size: .9rem; }
+.difficulty-options strong span { color: var(--brand-dark); font-size: .68rem; font-weight: 800; }
+.difficulty-options small { color: var(--muted); font-size: .7rem; line-height: 1.2; }
+.game-statusbar { min-height: 78px; padding: 12px 16px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: center; border-bottom: 2px solid var(--line); background: var(--marigold); }
 .run-progress > span, .score-summary > span { display: block; color: #4c3424; font-size: .75rem; font-weight: 750; }
 .take-pips { margin-top: 8px; display: flex; gap: 6px; }
 .take-pips i { width: 24px; height: 7px; display: block; border: 1px solid var(--line); background: var(--paper-bright); }
@@ -118,11 +115,6 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 .take-pips i.won { background: var(--green); }
 .score-summary { min-width: 92px; text-align: right; }
 .score-summary strong { display: block; color: var(--brand-dark); font-size: 1.65rem; line-height: 1; font-weight: 800; font-variant-numeric: tabular-nums; }
-.hint-button { min-width: 150px; padding: 0 14px; display: grid; grid-template-columns: 1fr auto; column-gap: 10px; align-items: center; color: var(--ink); background: var(--paper-bright); text-align: left; }
-.hint-button strong { font-size: .875rem; }
-.hint-button small { color: var(--muted); font-size: .75rem; }
-.hint-button:disabled { opacity: .48; cursor: not-allowed; }
-
 /* Clues */
 .clue-reel { padding: 16px; border-bottom: 2px solid var(--line); background: #f9d8c1; }
 .content-label { display: block; margin-bottom: 10px; }
@@ -329,15 +321,14 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
   .settings-summary > span:last-child { flex: 0 0 auto; color: var(--brand); font-size: .8rem; font-weight: 800; }
   .game-setup { display: none; padding: 12px; gap: 16px; }
   .game-setup.open { display: grid; }
-  .format-options { grid-template-columns: 1fr; }
-  .format-options button { height: var(--control-h); }
+  .difficulty-options { grid-template-columns: 1fr; }
+  .difficulty-options button { height: var(--control-h); }
   .game-statusbar { padding: 12px; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
   .run-progress { min-width: 0; }
   .take-pips { gap: 4px; }
   .take-pips i { width: auto; max-width: 24px; flex: 1 1 0; }
   .score-summary { min-width: 82px; }
   .score-summary > span { font-size: .68rem; white-space: nowrap; }
-  .hint-button { grid-column: 1 / -1; width: 100%; min-width: 0; }
   .clue-reel { padding: 12px; }
   .clue-track { display: flex; overflow-x: auto; scroll-snap-type: x proximity; }
   .clue-track article { min-width: 176px; scroll-snap-align: start; }

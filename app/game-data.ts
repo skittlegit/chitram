@@ -1,7 +1,7 @@
 import { CATALOG_ADDITIONS, type CatalogLane } from "./movie-catalog";
 
 export type Decade = "2000s" | "2010s" | "2020s";
-export type GameType = "classic" | "spotlight" | "rush";
+export type Difficulty = "easy" | "medium" | "hard";
 
 export type Movie = {
   id: string;
@@ -21,16 +21,18 @@ export type Movie = {
 
 export const DECADES: Decade[] = ["2000s", "2010s", "2020s"];
 
-export const GAME_TYPES: Array<{
-  id: GameType;
+export const DIFFICULTIES: Array<{
+  id: Difficulty;
   name: string;
-  kicker: string;
   description: string;
+  startingClues: number;
   maxGuesses: number;
+  baseScore: number;
+  guessPenalty: number;
 }> = [
-  { id: "classic", name: "Classic Cut", kicker: "Compare every clue", description: "Six guesses. Every film reveals six colour-coded connections.", maxGuesses: 6 },
-  { id: "spotlight", name: "Spotlight", kicker: "Clues enter the frame", description: "A new story clue rolls after every miss. Solve it in five.", maxGuesses: 5 },
-  { id: "rush", name: "First Day First Show", kicker: "High stakes", description: "Two clues, three guesses and a bigger score. No interval.", maxGuesses: 3 },
+  { id: "easy", name: "Easy", description: "Three clues and eight guesses. Best for a relaxed game.", startingClues: 3, maxGuesses: 8, baseScore: 600, guessPenalty: 50 },
+  { id: "medium", name: "Medium", description: "Two clues and six guesses. A balanced daily challenge.", startingClues: 2, maxGuesses: 6, baseScore: 900, guessPenalty: 75 },
+  { id: "hard", name: "Hard", description: "No starting clues and five guesses. Every comparison matters.", startingClues: 0, maxGuesses: 5, baseScore: 1200, guessPenalty: 100 },
 ];
 
 export const MOVIES: Record<Decade, Movie[]> = {
@@ -138,6 +140,6 @@ export function movieTitleWords(movie: Movie) {
 
 export const ALL_MOVIES = Object.values(MOVIES).flat();
 
-export function gameConfig(gameType: GameType) {
-  return GAME_TYPES.find((game) => game.id === gameType) ?? GAME_TYPES[0];
+export function difficultyConfig(difficulty: Difficulty) {
+  return DIFFICULTIES.find((item) => item.id === difficulty) ?? DIFFICULTIES[1];
 }

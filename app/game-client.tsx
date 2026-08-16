@@ -2,16 +2,15 @@
 
 import Image from "next/image";
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ALL_MOVIES, DECADES, GAME_TYPES, MOVIES, gameConfig, movieLane, movieTitleWords, type Decade, type GameType, type Movie } from "./game-data";
+import { ALL_MOVIES, DECADES, DIFFICULTIES, MOVIES, difficultyConfig, movieLane, movieTitleWords, type Decade, type Difficulty, type Movie } from "./game-data";
 
 type Mode = "daily" | "practice" | "archive";
 type Result = "match" | "close" | "miss";
 type Era = Decade | "All";
 type ClueField = "year" | "genres" | "director" | "hero" | "lane";
-type GameSelection = { decade?: Era; gameType?: GameType; mode?: Mode; archiveOffset?: number };
+type GameSelection = { decade?: Era; difficulty?: Difficulty; mode?: Mode; archiveOffset?: number };
 
 const ERAS: Era[] = ["All", ...DECADES];
-const MAX_PAID_HINTS = 3;
 
 type PlayerStats = {
   played: number;
@@ -33,7 +32,7 @@ const DEFAULT_STATS: PlayerStats = {
   streak: 0,
   bestScore: 0,
   points: 0,
-  distribution: [0, 0, 0, 0, 0, 0],
+  distribution: [0, 0, 0, 0, 0, 0, 0, 0],
 };
 const DEFAULT_PLAYER: PlayerData = { stats: DEFAULT_STATS, watchlist: [] };
 const PLAYER_KEY = "chitram-player-v2";
@@ -122,9 +121,9 @@ function resultEmoji(guess: Movie, answer: Movie) {
     .join("");
 }
 
-function scoreFor(gameType: GameType, guesses: number, hints: number) {
-  const base = gameType === "rush" ? 1400 : gameType === "spotlight" ? 1200 : 1000;
-  return Math.max(100, base - Math.max(0, guesses - 1) * 140 - hints * 110);
+function scoreFor(difficulty: Difficulty, guesses: number) {
+  const config = difficultyConfig(difficulty);
+  return Math.max(100, config.baseScore - Math.max(0, guesses - 1) * config.guessPenalty);
 }
 
 function nextPuzzleCountdown() {
@@ -183,7 +182,7 @@ function NextMovieCountdown() {
 export default function GameExperience({ initialDate }: { initialDate: string }) {
   const [currentDate, setCurrentDate] = useState(initialDate);
   const [decade, setDecade] = useState<Era>("All");
-  const [gameType, setGameType] = useState<GameType>("classic");
+  const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   const [mode, setMode] = useState<Mode>("daily");
   const [archiveOffset, setArchiveOffset] = useState(0);
   const [practiceIndex, setPracticeIndex] = useState(3);
@@ -191,7 +190,6 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   const [guesses, setGuesses] = useState<Movie[]>([]);
   const [status, setStatus] = useState<"playing" | "won" | "lost">("playing");
   const [highlight, setHighlight] = useState(-1);
-  const [hintsUsed, setHintsUsed] = useState(0);
   const [finalScore, setFinalScore] = useState(0);
   const [toast, setToast] = useState("");
   const [undoMovie, setUndoMovie] = useState<Movie | null>(null);
@@ -252,14 +250,13 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   }, []);
 
   const pool = moviesForEra(decade);
-  const config = gameConfig(gameType);
+  const config = difficultyConfig(difficulty);
   const answer = useMemo(() => {
     if (mode === "practice") return pool[practiceIndex % pool.length];
-    const gameIndex = GAME_TYPES.findIndex((game) => game.id === gameType);
     const eraIndex = decade === "All" ? 0 : DECADES.indexOf(decade) + 1;
-    const seed = puzzleNumber(currentDate) - archiveOffset + eraIndex * 17 + gameIndex * 29;
+    const seed = puzzleNumber(currentDate) - archiveOffset + eraIndex * 17;
     return pool[Math.abs(seed) % pool.length];
-  }, [archiveOffset, currentDate, decade, gameType, mode, pool, practiceIndex]);
+  }, [archiveOffset, currentDate, decade, mode, pool, practiceIndex]);
 
   const normalizedQuery = normalize(query);
   const suggestions = useMemo(() => {
@@ -272,25 +269,16 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   }, [guesses, normalizedQuery, pool]);
 
   const clues: { label: string; value: string; field?: ClueField }[] = [
+    { label: "Release year", value: String(answer.year), field: "year" },
+    { label: "Genre signal", value: answer.genres.join(" / "), field: "genres" },
     answer.lane
       ? { label: "Film lane", value: movieLane(answer), field: "lane" }
       : { label: "Story beat", value: answer.storyClue },
-    { label: "Release year", value: String(answer.year), field: "year" },
-    { label: "Genre signal", value: answer.genres.join(" / "), field: "genres" },
     { label: "The filmmaker", value: answer.director, field: "director" },
     { label: "Lead billing", value: answer.hero, field: "hero" },
   ];
-  const knownClueFields = new Set<ClueField>(
-    (["year", "genres", "director", "hero", "lane"] as ClueField[]).filter((field) =>
-      guesses.some((guess) => getResult(field, guess, answer) === "match"),
-    ),
-  );
-  const availableClues = clues.filter((clue) => !clue.field || !knownClueFields.has(clue.field));
-  const earnedClues = gameType === "rush" ? 2 : gameType === "spotlight" ? 1 + guesses.length : 0;
-  const visibleClues = availableClues.slice(0, earnedClues + hintsUsed);
-  const revealedClues = visibleClues.length;
-  const canRevealHint = status === "playing" && hintsUsed < MAX_PAID_HINTS && visibleClues.length < availableClues.length;
-  const potentialScore = scoreFor(gameType, Math.max(1, guesses.length + 1), hintsUsed);
+  const visibleClues = clues.slice(0, config.startingClues);
+  const potentialScore = scoreFor(difficulty, Math.max(1, guesses.length + 1));
   const guessesLeft = config.maxGuesses - guesses.length;
 
   function resetBoard() {
@@ -298,7 +286,6 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     setGuesses([]);
     setStatus("playing");
     setHighlight(-1);
-    setHintsUsed(0);
     setFinalScore(0);
     setToast("");
   }
@@ -316,7 +303,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     const nextDecade = next.decade ?? decade;
     const nextMode = next.mode ?? mode;
     setDecade(nextDecade);
-    setGameType(next.gameType ?? gameType);
+    setDifficulty(next.difficulty ?? difficulty);
     setMode(nextMode);
     setArchiveOffset(next.archiveOffset ?? (nextMode === "archive" ? archiveOffset : 0));
     if (nextMode === "practice") setPracticeIndex(Math.floor(Math.random() * moviesForEra(nextDecade).length));
@@ -327,10 +314,10 @@ export default function GameExperience({ initialDate }: { initialDate: string })
 
   function startGame(next: GameSelection, force = false) {
     const nextDecade = next.decade ?? decade;
-    const nextGameType = next.gameType ?? gameType;
+    const nextDifficulty = next.difficulty ?? difficulty;
     const nextMode = next.mode ?? mode;
     const nextArchiveOffset = next.archiveOffset ?? (nextMode === "archive" ? archiveOffset : 0);
-    const changesGame = nextDecade !== decade || nextGameType !== gameType || nextMode !== mode || nextArchiveOffset !== archiveOffset;
+    const changesGame = nextDecade !== decade || nextDifficulty !== difficulty || nextMode !== mode || nextArchiveOffset !== archiveOffset;
 
     if (!changesGame && !force) return;
     if (guesses.length > 0 && status === "playing" && !force) {
@@ -342,7 +329,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   }
 
   function recordResult(won: boolean, guessesUsed: number, score: number) {
-    const distribution = [...player.stats.distribution];
+    const distribution = Array.from({ length: 8 }, (_, index) => player.stats.distribution[index] || 0);
     if (won && guessesUsed > 0 && guessesUsed <= distribution.length) distribution[guessesUsed - 1] += 1;
     savePlayer({
       ...player,
@@ -373,7 +360,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     setHighlight(-1);
     setToast("");
     if (movie.id === answer.id) {
-      const score = scoreFor(gameType, nextGuesses.length, hintsUsed);
+      const score = scoreFor(difficulty, nextGuesses.length);
       setStatus("won");
       setFinalScore(score);
       recordResult(true, nextGuesses.length, score);
@@ -397,15 +384,6 @@ export default function GameExperience({ initialDate }: { initialDate: string })
       setQuery("");
       setHighlight(-1);
     }
-  }
-
-  function revealHint() {
-    if (!canRevealHint) {
-      setToast("Every useful clue is already known or on screen.");
-      return;
-    }
-    setHintsUsed((value) => value + 1);
-    setToast("Clue developed. −110 points.");
   }
 
   function toggleVault(movie: Movie) {
@@ -439,7 +417,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     .filter((movie): movie is Movie => Boolean(movie));
 
   return (
-    <main id="top" className={`site ${decade === "All" ? "era-all" : `era-${decade}`}`}>
+    <main id="top" className="site">
       {toast && <div className="global-toast" role="status" aria-live="polite"><span>{toast}</span>{undoMovie && <button type="button" onClick={undoVaultRemoval}>Undo</button>}</div>}
 
       <header className="topbar">
@@ -461,7 +439,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
         <div className="hero-copy">
           <div className="eyebrow"><span lang="te">తెలుగు సినిమా</span> Daily movie game · #{puzzleNumber(currentDate)}</div>
           <h1>Guess the film <em>before the interval.</em></h1>
-          <p>One mystery Telugu movie. Use its year, cast, director and genre to name it in six guesses.</p>
+          <p>One mystery Telugu movie. Choose how many clues you want, then use every comparison to find it.</p>
           <div className="hero-actions">
             <a className="primary-cta" href="#game">Start today&apos;s show <span>→</span></a>
             <button className="secondary-cta" onClick={() => startGame({ mode: "practice" }, true)}>Play an unlimited practice show</button>
@@ -475,7 +453,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
         <div className="hero-poster" role="img" aria-label="A typographic poster for today's mystery Telugu movie">
           <div className="poster-band"><span>First day</span><span>First show</span></div>
           <div className="poster-title"><small>Today&apos;s mystery</small><strong>సినిమా?</strong></div>
-          <div className="poster-billing"><span>1 film</span><span>6 clues</span><span>{config.maxGuesses} guesses</span></div>
+          <div className="poster-billing"><span>{config.name}</span><span>{config.startingClues || "No"} clues</span><span>{config.maxGuesses} guesses</span></div>
           <div className="poster-showtime">
             <span>Next show</span><NextMovieCountdown />
           </div>
@@ -496,9 +474,9 @@ export default function GameExperience({ initialDate }: { initialDate: string })
           </button>
           <div className={`game-setup ${settingsOpen ? "open" : ""}`} id="game-settings">
             <fieldset>
-              <legend>Game style</legend>
-              <div className="setup-options format-options">
-                {GAME_TYPES.map((game) => <button type="button" key={game.id} aria-pressed={gameType === game.id} className={gameType === game.id ? "active" : ""} onClick={() => startGame({ gameType: game.id })}><strong>{game.id === "classic" ? "Classic" : game.id === "rush" ? "First Show" : game.name}</strong><small>{game.maxGuesses} guesses</small></button>)}
+              <legend>Difficulty</legend>
+              <div className="setup-options difficulty-options">
+                {DIFFICULTIES.map((item) => <button type="button" key={item.id} aria-pressed={difficulty === item.id} className={difficulty === item.id ? "active" : ""} onClick={() => startGame({ difficulty: item.id })}><strong>{item.name}<span>{item.baseScore.toLocaleString("en-IN")} pts</span></strong><small>{item.startingClues ? `${item.startingClues} clues` : "No clues"} · {item.maxGuesses} guesses</small></button>)}
               </div>
             </fieldset>
             <fieldset>
@@ -518,14 +496,13 @@ export default function GameExperience({ initialDate }: { initialDate: string })
 
           <div className="game-statusbar">
             <div className="run-progress">
-              <span>{guessesLeft} {guessesLeft === 1 ? "guess" : "guesses"} left</span>
+              <span>{config.name} · {guessesLeft} {guessesLeft === 1 ? "guess" : "guesses"} left</span>
               <div className="take-pips" aria-label={`${guesses.length} of ${config.maxGuesses} guesses used`}>{Array.from({ length: config.maxGuesses }).map((_, index) => <i key={index} className={index < guesses.length ? (guesses[index].id === answer.id ? "won" : "used") : ""} />)}</div>
             </div>
-            <div className="score-summary"><span>Possible score</span><strong>{potentialScore.toLocaleString("en-IN")}</strong></div>
-            <button className="hint-button" onClick={revealHint} disabled={!canRevealHint}><strong>Show a clue</strong><small>{hintsUsed}/{MAX_PAID_HINTS} opened</small></button>
+            <div className="score-summary"><span>Score now</span><strong>{potentialScore.toLocaleString("en-IN")}</strong></div>
           </div>
 
-          {revealedClues > 0 && <div className="clue-reel"><span className="content-label">Clues</span><div className="clue-track">{visibleClues.map((clue) => <article key={clue.label}><span>{clue.label}</span><strong>{clue.value}</strong></article>)}</div></div>}
+          {visibleClues.length > 0 && <div className="clue-reel"><span className="content-label">Your {config.name.toLowerCase()} clues</span><div className="clue-track">{visibleClues.map((clue) => <article key={clue.label}><span>{clue.label}</span><strong>{clue.value}</strong></article>)}</div></div>}
 
           <div className="play-area">
             {status === "playing" ? (
@@ -575,8 +552,8 @@ export default function GameExperience({ initialDate }: { initialDate: string })
       <section className="quick-guide section-target" id="how" tabIndex={-1}>
         <div className="guide-heading"><span>How it plays</span><h2>Read the signals.</h2></div>
         <div className="guide-grid">
-          <article><span>01</span><div><strong>Put a film on the slate</strong><p>Start with any Telugu movie you know.</p></div></article>
-          <article><span>02</span><div><strong>Read every reveal</strong><p>Year, lead, director and genre narrow the mystery.</p></div></article>
+          <article><span>01</span><div><strong>Choose your difficulty</strong><p>Easy gives 3 clues, Medium 2, and Hard none.</p></div></article>
+          <article><span>02</span><div><strong>Put a film on the slate</strong><p>Search any Telugu movie, then compare every reveal.</p></div></article>
           <article><span>03</span><div><strong>Follow the print colours</strong><p><i className="key exact" /> Exact <i className="key close" /> Close <i className="key miss" /> Miss</p></div></article>
         </div>
       </section>
