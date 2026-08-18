@@ -163,7 +163,7 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 
 /* Guess board */
 .clue-board { grid-column: 1; grid-row: 1; overflow: hidden; border: 2px solid var(--line); background: var(--paper-bright); }
-.grid-head { display: grid; grid-template-columns: repeat(6, 1fr); border-bottom: 2px solid var(--line); background: var(--ink); }
+.grid-head { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border-bottom: 2px solid var(--line); background: var(--ink); }
 .grid-head span { padding: 10px 5px; color: var(--paper-bright); border-right: 1px solid #f3e6c844; text-align: center; font-size: .7rem; font-weight: 750; text-transform: uppercase; }
 .empty-board { min-height: 310px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
 .empty-board::before { content: "?"; width: 58px; height: 58px; margin-bottom: 16px; display: grid; place-items: center; color: var(--paper-bright); background: var(--brand); font-size: 2rem; font-weight: 800; }
@@ -173,7 +173,7 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 .guess-title { min-height: 42px; padding: 8px 11px; display: flex; align-items: center; gap: 10px; color: var(--paper-bright); background: var(--brand); }
 .guess-title span { font-size: .7rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
 .guess-title strong { font-size: 1rem; font-weight: 750; }
-.cells { display: grid; grid-template-columns: repeat(6, 1fr); }
+.cells { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .cell { min-width: 0; min-height: 104px; padding: 9px 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border-right: 1px solid #f3e6c855; color: var(--paper-bright); text-align: center; animation: flip-in .28s both; transform-origin: center; }
 .cell.match { background: var(--green); }
 .cell.close { color: var(--ink); background: var(--marigold); }

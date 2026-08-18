@@ -1,7 +1,9 @@
 import { CATALOG_ADDITIONS, type CatalogLane } from "./movie-catalog";
+import { bespokeStoryClueFor } from "./movie-story-clues";
 
 export type Decade = "2000s" | "2010s" | "2020s";
 export type Difficulty = "easy" | "medium" | "hard";
+export type FilmFamily = "Mega" | "Nandamuri" | "Akkineni" | "Daggubati" | "Ghattamaneni" | "Uppalapati" | "Manchu" | "Deverakonda" | "Bellamkonda" | "EVV" | "Nara" | "Independent";
 
 export type Movie = {
   id: string;
@@ -15,6 +17,7 @@ export type Movie = {
   release: string;
   difficulty: "Crowd pleaser" | "Fan favourite" | "Deep cut";
   storyClue: string;
+  storyClueSource?: "hand-authored" | "generated";
   lane?: CatalogLane;
   aliases?: string[];
 };
@@ -36,6 +39,9 @@ export const DIFFICULTIES: Array<{
   { id: "hard", name: "Hard", description: "No clues. Five guesses, so every comparison matters.", maxClues: 0, maxGuesses: 5, baseScore: 1200, guessPenalty: 100, cluePenalty: 0 },
 ];
 
+// These are the hand-authored showcase records with bespoke story clues. The
+// complete playable catalogue is assembled with CATALOG_ADDITIONS below; use
+// MOVIES after module initialization or ALL_MOVIES when reading the full reel.
 export const MOVIES: Record<Decade, Movie[]> = {
   "2000s": [
     { id: "nuvvunaku", title: "Nuvvu Naaku Nachav", year: 2001, hero: "Venkatesh", family: "Daggubati", director: "K. Vijaya Bhaskar", genres: ["Romance", "Comedy"], banner: "Sri Sravanthi Movies", release: "Regular", difficulty: "Fan favourite", storyClue: "A wedding house becomes the setting for an impossible romance.", aliases: ["Nuvvu Naku Nachav"] },
@@ -81,13 +87,30 @@ export const MOVIES: Record<Decade, Movie[]> = {
   ],
 };
 
+const FILM_FAMILY_RULES: Array<{ family: Exclude<FilmFamily, "Independent">; matches: (lead: string) => boolean }> = [
+  { family: "Mega", matches: (lead) => ["Chiranjeevi", "Pawan Kalyan", "Allu Arjun", "Allu Sirish", "Ram Charan", "Varun Tej", "Sai Dharam Tej", "Panja Vaisshnav Tej", "Vaisshnav Tej"].includes(lead) },
+  { family: "Nandamuri", matches: (lead) => ["Nandamuri Balakrishna", "Jr NTR", "Nandamuri Kalyan Ram", "Nandamuri Taraka Ratna", "Taraka Ratna"].includes(lead) },
+  { family: "Akkineni", matches: (lead) => ["Nagarjuna", "Naga Chaitanya", "Akhil Akkineni", "Sumanth", "Sushanth", "Akkineni family"].includes(lead) },
+  { family: "Daggubati", matches: (lead) => ["Venkatesh", "Rana Daggubati"].includes(lead) },
+  { family: "Ghattamaneni", matches: (lead) => ["Mahesh Babu", "Sudheer Babu", "Ashok Galla"].includes(lead) || lead.includes("Ghattamaneni") },
+  { family: "Uppalapati", matches: (lead) => lead === "Prabhas" },
+  { family: "Manchu", matches: (lead) => lead === "Mohan Babu" || lead.includes("Manchu") },
+  { family: "Deverakonda", matches: (lead) => ["Vijay Deverakonda", "Anand Deverakonda"].includes(lead) },
+  { family: "Bellamkonda", matches: (lead) => lead.includes("Bellamkonda") },
+  { family: "EVV", matches: (lead) => ["Allari Naresh", "Aryan Rajesh"].includes(lead) },
+  { family: "Nara", matches: (lead) => lead === "Nara Rohit" },
+];
+
+function familiesForLead(lead: string): FilmFamily[] {
+  const billedLeads = lead.split(/\s*&\s*/);
+  const families = FILM_FAMILY_RULES
+    .filter((rule) => billedLeads.some((billedLead) => rule.matches(billedLead)))
+    .map((rule) => rule.family);
+  return families.length ? families : ["Independent"];
+}
+
 function familyFor(lead: string) {
-  if (["Chiranjeevi", "Pawan Kalyan", "Allu Arjun", "Ram Charan", "Varun Tej", "Sai Dharam Tej", "Vaisshnav Tej"].some((name) => lead.includes(name))) return "Mega";
-  if (["Nandamuri Balakrishna", "Jr NTR", "Nandamuri Kalyan Ram"].some((name) => lead.includes(name))) return "Nandamuri";
-  if (["Nagarjuna", "Naga Chaitanya", "Akhil Akkineni", "Akkineni family"].some((name) => lead.includes(name))) return "Akkineni";
-  if (["Venkatesh", "Rana Daggubati"].some((name) => lead.includes(name))) return "Daggubati";
-  if (lead.includes("Mahesh Babu")) return "Ghattamaneni";
-  return "Other";
+  return familiesForLead(lead).join(" + ");
 }
 
 function slugFor(title: string) {
@@ -109,6 +132,7 @@ function normalizeTitle(title: string) {
 for (const [title, year, hero, director, genres, lane] of CATALOG_ADDITIONS) {
   const key = `${normalizeTitle(title)}-${year}`;
   if (existingMovies.has(key)) continue;
+  const bespokeStoryClue = bespokeStoryClueFor(title, year);
   MOVIES[decadeFor(year)].push({
     id: `${slugFor(title)}-${year}`,
     title,
@@ -120,7 +144,8 @@ for (const [title, year, hero, director, genres, lane] of CATALOG_ADDITIONS) {
     banner: lane,
     release: "Regular",
     difficulty: lane === "Star vehicle" ? "Crowd pleaser" : lane === "Breakout hit" ? "Fan favourite" : "Deep cut",
-    storyClue: `A ${genres.toLowerCase().replace("/", " and ")} film in the ${lane.toLowerCase()} lane.`,
+    storyClue: bespokeStoryClue ?? `A ${genres.toLowerCase().replace("/", " and ")} film in the ${lane.toLowerCase()} lane.`,
+    storyClueSource: bespokeStoryClue ? "hand-authored" : "generated",
     lane,
   });
   existingMovies.add(key);
@@ -139,7 +164,97 @@ export function movieTitleWords(movie: Movie) {
   return movie.title.trim().split(/\s+/).length;
 }
 
+export function movieLeads(movie: Movie) {
+  return movie.hero.split(/\s*&\s*/).map((lead) => lead.trim());
+}
+
+export function movieFamilies(movie: Movie) {
+  return familiesForLead(movie.hero);
+}
+
+export function movieFamilyLabel(movie: Movie) {
+  const families = movieFamilies(movie);
+  return families[0] === "Independent" ? "Independent" : `${families.join(" + ")} family`;
+}
+
 export const ALL_MOVIES = Object.values(MOVIES).flat();
+
+export const CATALOG_STATS = {
+  total: ALL_MOVIES.length,
+  byLane: {
+    "Star vehicle": ALL_MOVIES.filter((movie) => movieLane(movie) === "Star vehicle").length,
+    "Breakout hit": ALL_MOVIES.filter((movie) => movieLane(movie) === "Breakout hit").length,
+    "Cult favourite": ALL_MOVIES.filter((movie) => movieLane(movie) === "Cult favourite").length,
+  },
+  releases2026: ALL_MOVIES.filter((movie) => movie.year === 2026).length,
+  bespokeStoryClues: ALL_MOVIES.filter((movie) => movie.storyClueSource !== "generated").length,
+} as const;
+
+if (
+  CATALOG_STATS.total < 730 ||
+  CATALOG_STATS.byLane["Breakout hit"] < 185 ||
+  CATALOG_STATS.byLane["Cult favourite"] < 50 ||
+  CATALOG_STATS.releases2026 < 30 ||
+  CATALOG_STATS.bespokeStoryClues < 550
+) {
+  throw new Error(`Movie catalogue coverage regressed: ${JSON.stringify(CATALOG_STATS)}`);
+}
+
+const revealingStoryClues = ALL_MOVIES.filter(
+  (movie) =>
+    movie.storyClueSource !== "generated" &&
+    normalizeTitle(movie.title).length >= 5 &&
+    normalizeTitle(movie.storyClue).includes(normalizeTitle(movie.title)),
+);
+
+if (revealingStoryClues.length) {
+  throw new Error(`Story clues reveal their titles: ${revealingStoryClues.map((movie) => movie.title).join(", ")}`);
+}
+
+// Keep the catalogue honest: these floors represent the established leads whose
+// starring filmographies the game promises to cover. A future accidental trim or
+// malformed billing fails loudly during development/build instead of reaching users.
+export const MAINSTREAM_ACTOR_MINIMUMS = {
+  Chiranjeevi: 18,
+  "Pawan Kalyan": 23,
+  "Mahesh Babu": 27,
+  "Jr NTR": 30,
+  Prabhas: 23,
+  "Allu Arjun": 20,
+  "Ram Charan": 15,
+  "Nandamuri Balakrishna": 34,
+  Nagarjuna: 39,
+  Venkatesh: 34,
+  "Ravi Teja": 49,
+  Nani: 31,
+  Gopichand: 27,
+  Nithiin: 31,
+  "Ram Pothineni": 22,
+  "Naga Chaitanya": 22,
+  "Nandamuri Kalyan Ram": 19,
+  "Sai Dharam Tej": 15,
+  "Varun Tej": 14,
+  Sharwanand: 19,
+} as const;
+
+function hasBilledActor(movie: Movie, actor: string) {
+  return movie.hero.split(/\s*&\s*/).includes(actor);
+}
+
+export const MAINSTREAM_ACTOR_COVERAGE = Object.fromEntries(
+  Object.keys(MAINSTREAM_ACTOR_MINIMUMS).map((actor) => [
+    actor,
+    ALL_MOVIES.filter((movie) => hasBilledActor(movie, actor)).length,
+  ]),
+) as Record<keyof typeof MAINSTREAM_ACTOR_MINIMUMS, number>;
+
+const coverageDeficits = Object.entries(MAINSTREAM_ACTOR_MINIMUMS)
+  .filter(([actor, minimum]) => MAINSTREAM_ACTOR_COVERAGE[actor as keyof typeof MAINSTREAM_ACTOR_MINIMUMS] < minimum)
+  .map(([actor, minimum]) => `${actor} (${MAINSTREAM_ACTOR_COVERAGE[actor as keyof typeof MAINSTREAM_ACTOR_MINIMUMS]}/${minimum})`);
+
+if (coverageDeficits.length) {
+  throw new Error(`Mainstream actor catalogue coverage regressed: ${coverageDeficits.join(", ")}`);
+}
 
 export function difficultyConfig(difficulty: Difficulty) {
   return DIFFICULTIES.find((item) => item.id === difficulty) ?? DIFFICULTIES[1];

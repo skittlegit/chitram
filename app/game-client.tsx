@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ALL_MOVIES, DECADES, DIFFICULTIES, MOVIES, difficultyConfig, movieLane, movieTitleWords, type Decade, type Difficulty, type Movie } from "./game-data";
+import { ALL_MOVIES, DECADES, DIFFICULTIES, MOVIES, difficultyConfig, movieFamilies, movieLane, movieLeads, movieTitleWords, type Decade, type Difficulty, type Movie } from "./game-data";
 
 type Mode = "daily" | "practice" | "archive";
 type Result = "match" | "close" | "miss";
@@ -104,9 +104,17 @@ function archiveLabel(date: string, offset: number) {
 function getResult(field: string, guess: Movie, answer: Movie): Result {
   if (guess.id === answer.id) return "match";
   if (field === "year") return guess.year === answer.year ? "match" : Math.abs(guess.year - answer.year) <= 2 ? "close" : "miss";
-  if (field === "hero") return guess.hero === answer.hero ? "match" : guess.family !== "Other" && (answer.family.includes(guess.family) || guess.family.includes(answer.family)) ? "close" : "miss";
+  if (field === "hero") {
+    const guessLeads = movieLeads(guess);
+    const answerLeads = movieLeads(answer);
+    const guessFamilies = movieFamilies(guess);
+    const answerFamilies = movieFamilies(answer);
+    return guessLeads.length === answerLeads.length && guessLeads.every((lead) => answerLeads.includes(lead))
+      ? "match"
+      : guessLeads.some((lead) => answerLeads.includes(lead)) || guessFamilies.some((family) => family !== "Independent" && answerFamilies.includes(family)) ? "close" : "miss";
+  }
   if (field === "director") return guess.director === answer.director ? "match" : "miss";
-  if (field === "genres") return guess.genres.join() === answer.genres.join() ? "match" : guess.genres.some((genre) => answer.genres.includes(genre)) ? "close" : "miss";
+  if (field === "genres") return guess.genres.length === answer.genres.length && guess.genres.every((genre) => answer.genres.includes(genre)) ? "match" : guess.genres.some((genre) => answer.genres.includes(genre)) ? "close" : "miss";
   if (field === "lane") return movieLane(guess) === movieLane(answer) ? "match" : "miss";
   if (field === "words") {
     const difference = Math.abs(movieTitleWords(guess) - movieTitleWords(answer));
@@ -272,9 +280,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   const clues: { label: string; value: string; field?: ClueField }[] = [
     { label: "Release year", value: String(answer.year), field: "year" },
     { label: "Genre signal", value: answer.genres.join(" / "), field: "genres" },
-    answer.lane
-      ? { label: "Film lane", value: movieLane(answer), field: "lane" }
-      : { label: "Story beat", value: answer.storyClue },
+    { label: "Story beat", value: answer.storyClue },
     { label: "The filmmaker", value: answer.director, field: "director" },
     { label: "Lead billing", value: answer.hero, field: "hero" },
   ];
@@ -476,7 +482,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
           </div>
           <div className="hero-facts">
             <span><strong>{ALL_MOVIES.length}</strong> films in the reel</span>
-            <span><strong>2000–2025</strong> releases</span>
+            <span><strong>2000–2026</strong> releases</span>
             <span><strong>Midnight IST</strong> new show</span>
           </div>
         </div>
@@ -565,7 +571,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
               <div className="grid-head">{["Year", "Lead", "Director", "Genre", "Movie type", "Title length"].map((column) => <span key={column}>{column}</span>)}</div>
               {guesses.length === 0 ? <div className="empty-board"><span>Start with any movie you know.</span><small>Your matches will appear here.</small></div> : <div className="guess-list">{guesses.map((guess, row) => {
                 const cells = [
-                  { field: "year", label: "Year", value: String(guess.year), sub: guess.year < answer.year ? "↑ Answer is later" : guess.year > answer.year ? "↓ Answer is earlier" : "Exact" },
+                  { field: "year", label: "Year", value: String(guess.year), sub: guess.year === answer.year ? "Year" : guess.year < answer.year ? "↑ Answer is later" : "↓ Answer is earlier" },
                   { field: "hero", label: "Lead", value: guess.hero, sub: getResult("hero", guess, answer) === "close" ? "Related film family" : "Lead actor" },
                   { field: "director", label: "Director", value: guess.director, sub: "Director" },
                   { field: "genres", label: "Genre", value: guess.genres.join(" / "), sub: getResult("genres", guess, answer) === "close" ? "Genre overlap" : "Genre" },
@@ -574,7 +580,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
                 ];
                 return <div className="guess-row" key={guess.id}><div className="guess-title"><span>Guess {row + 1}</span><strong>{guess.title}</strong></div><div className="cells">{cells.map((cell, index) => {
                   const result = getResult(cell.field, guess, answer);
-                  const resultLabel = result === "match" ? "Exact match" : result === "close" ? "Close" : "No match";
+                  const resultLabel = result === "match" ? (cell.field === "year" ? answer.release : "Exact match") : result === "close" ? "Close" : "No match";
                   return <div className={`cell ${result}`} aria-label={`${cell.label}: ${cell.value}. ${resultLabel}. ${cell.sub}.`} style={{ animationDelay: `${index * 45}ms` }} key={cell.field}><small className="cell-label">{cell.label}</small><strong>{cell.value}</strong><small className="cell-result">{resultLabel}</small><small className="cell-note">{cell.sub}</small></div>;
                 })}</div></div>;
               })}</div>}
