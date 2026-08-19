@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ALL_MOVIES, DECADES, GAME_RULES, MOVIES, movieFamilies, movieLane, movieLeads, movieTitleWords, type Decade, type Movie } from "./game-data";
 
@@ -199,7 +200,7 @@ function NextMovieCountdown() {
   return <strong>{countdown || "Midnight IST"}</strong>;
 }
 
-export default function GameExperience({ initialDate }: { initialDate: string }) {
+export default function GameExperience({ initialDate, focused = false }: { initialDate: string; focused?: boolean }) {
   const [currentDate, setCurrentDate] = useState(initialDate);
   const [decade, setDecade] = useState<Era>("All");
   const [mode, setMode] = useState<Mode>("daily");
@@ -323,6 +324,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     if (nextMode === "practice") setPracticeIndex(Math.floor(Math.random() * moviesForEra(nextDecade).length));
     resetBoard();
     setPendingGame(null);
+    setSettingsOpen(false);
     window.setTimeout(() => scrollToSection("game"), 0);
   }
 
@@ -458,6 +460,129 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   const savedMovies = player.watchlist
     .map((id) => ALL_MOVIES.find((movie) => movie.id === id))
     .filter((movie): movie is Movie => Boolean(movie));
+
+  if (focused) {
+    const gameNumber = puzzleNumber(currentDate) - archiveOffset;
+    return (
+      <main className="play-page" id="top">
+        <a className="skip-link" href="#film-search-focused">Skip to movie search</a>
+        {toast && <div className="global-toast play-toast" role="status" aria-live="polite"><span>{toast}</span>{undoMovie && <button type="button" onClick={undoVaultRemoval}>Undo</button>}</div>}
+
+        <header className="play-header">
+          <Link className="play-brand wordmark" href="/" aria-label="Chitram home">Chitram</Link>
+          <div className="play-edition" aria-label={`${modeLabel}, puzzle ${gameNumber}`}>
+            <i aria-hidden="true" />
+            <span>{mode === "practice" ? "Practice reel" : mode === "archive" ? "From the archive" : "Today's film"}</span>
+            <strong>#{gameNumber}</strong>
+          </div>
+          <button className="play-settings-trigger" type="button" aria-controls="focused-game-settings" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((value) => !value)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" /></svg>
+            <span>{settingsOpen ? "Close" : gameSetupLabel}</span>
+          </button>
+        </header>
+
+        <section className="play-stage section-target" id="game" tabIndex={-1}>
+          {pendingGame && <div className="play-restart" role="alert"><div><strong>Switch games?</strong><span>Your current guesses will be cleared.</span></div><div><button type="button" onClick={() => applyGame(pendingGame)}>Start new game</button><button type="button" className="secondary" onClick={() => setPendingGame(null)}>Keep playing</button></div></div>}
+
+          <div className={`play-settings-panel ${settingsOpen ? "open" : ""}`} id="focused-game-settings" hidden={!settingsOpen}>
+            <fieldset>
+              <legend>Game mode</legend>
+              <div className="play-option-row">
+                <button type="button" aria-pressed={mode === "daily"} className={mode === "daily" ? "active" : ""} onClick={() => startGame({ mode: "daily", archiveOffset: 0 })}><strong>Daily</strong><small>Today&apos;s shared film</small></button>
+                <button type="button" aria-pressed={mode === "practice"} className={mode === "practice" ? "active" : ""} onClick={() => startGame({ mode: "practice" })}><strong>Practice</strong><small>Unlimited movies</small></button>
+              </div>
+            </fieldset>
+            <fieldset>
+              <legend>Movie years</legend>
+              <div className="play-option-row eras">
+                {ERAS.map((item) => <button type="button" key={item} aria-pressed={decade === item} className={decade === item ? "active" : ""} onClick={() => startGame({ decade: item })}><strong>{item === "All" ? "All eras" : item}</strong></button>)}
+              </div>
+            </fieldset>
+          </div>
+
+          <div className="play-titlebar">
+            <div>
+              <span className="play-kicker"><b lang="te">తెలుగు సినిమా</b> / {modeLabel}</span>
+              <h1>Name the movie.</h1>
+            </div>
+            <div className="play-score">
+              <span>{status === "playing" ? "Score" : "Final"}</span>
+              <strong>{(status === "playing" ? potentialScore : finalScore).toLocaleString("en-IN")}</strong>
+              <small>{status === "playing" ? `${guessesLeft} ${guessesLeft === 1 ? "guess" : "guesses"} left` : status === "won" ? "Movie solved" : "Game over"}</small>
+            </div>
+          </div>
+
+          <div className="play-progress-row">
+            <div className="play-takes">
+              <span>Take</span>
+              <div aria-label={`${guesses.length} of ${config.maxGuesses} guesses used`}>{Array.from({ length: config.maxGuesses }).map((_, index) => <i key={index} className={index < guesses.length ? (guesses[index].id === answer.id ? "won" : "used") : ""}><span>{index + 1}</span></i>)}</div>
+            </div>
+            <p><i className="key exact" /> Exact <i className="key close" /> Close <i className="key miss" /> Miss</p>
+          </div>
+
+          {status === "playing" ? (
+            <form className="play-search" onSubmit={(event) => submit(event)}>
+              <label htmlFor="film-search-focused"><strong>Make your guess</strong><small>Search {pool.length} Telugu films</small></label>
+              <div className="play-search-control">
+                <span aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="10.5" cy="10.5" r="5.75" /><path d="m15 15 4.25 4.25" /></svg></span>
+                <input id="film-search-focused" role="combobox" value={query} onChange={(event) => { setQuery(event.target.value); setHighlight(-1); setToast(""); }} onKeyDown={onSearchKeyDown} aria-autocomplete="list" aria-controls="focused-film-suggestions" aria-expanded={suggestions.length > 0} aria-activedescendant={highlight >= 0 && suggestions[highlight] ? `focused-film-option-${suggestions[highlight].id}` : undefined} autoComplete="off" autoFocus placeholder="Type a movie title..." />
+                <button type="submit">Guess <span aria-hidden="true">→</span></button>
+              </div>
+              {suggestions.length > 0 && <div className="play-suggestions" id="focused-film-suggestions" role="listbox" aria-label="Movie suggestions">{suggestions.map((movie, index) => <button type="button" role="option" id={`focused-film-option-${movie.id}`} aria-selected={index === highlight} tabIndex={-1} className={index === highlight ? "highlight" : ""} key={movie.id} onMouseDown={(event) => event.preventDefault()} onClick={() => submit(undefined, movie)}><MoviePoster movie={movie} className="play-suggestion-poster" /><span><strong>{movie.title}</strong><small>{movie.director}</small></span><em>{movie.year}</em></button>)}</div>}
+            </form>
+          ) : (
+            <div className={`play-result ${status}`} ref={resultRef} role="status" aria-live="polite" tabIndex={-1}>
+              <MoviePoster movie={answer} className="play-result-poster" />
+              <div className="play-result-copy"><span>{status === "won" ? "That's the one" : "The movie was"}</span><strong>{answer.title}</strong><small>{answer.year} · {answer.hero} · Directed by {answer.director}</small></div>
+              <div className="play-result-score"><span>{status === "won" ? "Final score" : "Better luck next reel"}</span><strong>{status === "won" ? finalScore.toLocaleString("en-IN") : "—"}</strong></div>
+              <div className="play-result-actions"><button type="button" onClick={share}>Share result</button><button type="button" className="secondary" onClick={() => toggleVault(answer)}>{player.watchlist.includes(answer.id) ? "Saved" : "Save movie"}</button>{mode === "practice" && <button type="button" className="secondary" onClick={() => startGame({ mode: "practice" }, true)}>Next movie</button>}</div>
+            </div>
+          )}
+
+          <div className={`play-workspace ${guesses.length > 0 ? "has-guesses" : ""}`}>
+            <section className="play-board" aria-labelledby="guess-board-title">
+              <div className="play-panel-heading"><div><span>Your slate</span><h2 id="guess-board-title">Guesses</h2></div><strong>{guesses.length}<small> / {config.maxGuesses}</small></strong></div>
+              <div className="play-grid-head">{["Year", "Lead", "Director", "Genre", "Movie type", "Title length"].map((column) => <span key={column}>{column}</span>)}</div>
+              {guesses.length === 0 ? (
+                <div className="play-empty-board">
+                  <div>{["Year", "Lead", "Director", "Genre", "Type", "Words"].map((label) => <span key={label}><i>?</i><small>{label}</small></span>)}</div>
+                  <strong>Your first guess reveals six signals.</strong>
+                  <small>Start with any Telugu movie you know.</small>
+                </div>
+              ) : (
+                <div className="play-guess-list">{guesses.map((guess, row) => {
+                  const cells = [
+                    { field: "year", label: "Year", value: String(guess.year), sub: guess.year === answer.year ? "Same year" : guess.year < answer.year ? "Answer is later ↑" : "Answer is earlier ↓" },
+                    { field: "hero", label: "Lead", value: guess.hero, sub: getResult("hero", guess, answer) === "close" ? "Related film family" : "Lead actor" },
+                    { field: "director", label: "Director", value: guess.director, sub: "Filmmaker" },
+                    { field: "genres", label: "Genre", value: guess.genres.join(" / "), sub: getResult("genres", guess, answer) === "close" ? "Some overlap" : "Genre" },
+                    { field: "lane", label: "Movie type", value: movieLane(guess), sub: "Release lane" },
+                    { field: "words", label: "Title length", value: `${movieTitleWords(guess)} ${movieTitleWords(guess) === 1 ? "word" : "words"}`, sub: getResult("words", guess, answer) === "close" ? "Off by one" : "Word count" },
+                  ];
+                  return <article className="play-guess" key={guess.id}><div className="play-guess-title"><span>{String(row + 1).padStart(2, "0")}</span><strong>{guess.title}</strong></div><div className="play-cells">{cells.map((cell, index) => {
+                    const result = getResult(cell.field, guess, answer);
+                    return <div className={`play-cell ${result}`} aria-label={`${cell.label}: ${cell.value}. ${result === "match" ? "Exact match" : result === "close" ? "Close" : "No match"}. ${cell.sub}.`} style={{ animationDelay: `${index * 45}ms` }} key={cell.field}><small className="play-cell-label">{cell.label}</small><strong>{cell.value}</strong><small>{result === "match" ? "Exact" : result === "close" ? "Close" : cell.sub}</small></div>;
+                  })}</div></article>;
+                })}</div>
+              )}
+            </section>
+
+            <aside className="play-tools" aria-label="Game tools">
+              <div className="play-panel-heading compact"><div><span>Need a nudge?</span><h2>Clues</h2></div><strong>{cluesRemaining}<small> left</small></strong></div>
+              <button className="play-clue-button" type="button" onClick={revealClue} disabled={!canRevealClue}>
+                <span><strong>{cluesRemaining === 0 ? "All clues used" : availableClues.length === 0 ? "Nothing new to reveal" : "Reveal next clue"}</strong><small>{cluesRemaining === 0 ? "Keep guessing" : availableClues.length === 0 ? "Your guesses covered them" : `Costs ${config.cluePenalty} points`}</small></span>
+                <b aria-hidden="true">?</b>
+              </button>
+              <div className="play-clue-stack">
+                {visibleClues.length > 0 ? visibleClues.map((clue, index) => <article key={clue.label}><span>Clue {index + 1} · {clue.label}</span><strong>{clue.value}</strong></article>) : <div className="play-no-clues"><span>?</span><strong>No clues used</strong><small>You can solve it clean for the full score.</small></div>}
+              </div>
+              <div className="play-penalties"><span>Scoring</span><p><strong>−{config.guessPenalty}</strong> each extra guess</p><p><strong>−{config.cluePenalty}</strong> each clue</p></div>
+            </aside>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main id="top" className="site">
