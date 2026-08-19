@@ -2,13 +2,13 @@
 
 import Image from "next/image";
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ALL_MOVIES, DECADES, DIFFICULTIES, MOVIES, difficultyConfig, movieFamilies, movieLane, movieLeads, movieTitleWords, type Decade, type Difficulty, type Movie } from "./game-data";
+import { ALL_MOVIES, DECADES, GAME_RULES, MOVIES, movieFamilies, movieLane, movieLeads, movieTitleWords, type Decade, type Movie } from "./game-data";
 
 type Mode = "daily" | "practice" | "archive";
 type Result = "match" | "close" | "miss";
 type Era = Decade | "All";
 type ClueField = "year" | "genres" | "director" | "hero" | "lane";
-type GameSelection = { decade?: Era; difficulty?: Difficulty; mode?: Mode; archiveOffset?: number };
+type GameSelection = { decade?: Era; mode?: Mode; archiveOffset?: number };
 
 const ERAS: Era[] = ["All", ...DECADES];
 
@@ -21,9 +21,16 @@ type PlayerStats = {
   distribution: number[];
 };
 
+type CompletedGame = {
+  result: "won" | "lost";
+  score: number;
+  guesses: number;
+};
+
 type PlayerData = {
   stats: PlayerStats;
   watchlist: string[];
+  completedGames: Record<string, CompletedGame>;
 };
 
 const DEFAULT_STATS: PlayerStats = {
@@ -34,9 +41,10 @@ const DEFAULT_STATS: PlayerStats = {
   points: 0,
   distribution: [0, 0, 0, 0, 0, 0, 0, 0],
 };
-const DEFAULT_PLAYER: PlayerData = { stats: DEFAULT_STATS, watchlist: [] };
+const DEFAULT_PLAYER: PlayerData = { stats: DEFAULT_STATS, watchlist: [], completedGames: {} };
 const PLAYER_KEY = "chitram-player-v2";
 const PLAYER_EVENT = "chitram-player-change";
+const POSTER_MATCH_VERSION = "cast-v3-unified";
 
 let cachedPlayerJson: string | null = null;
 let cachedPlayer = DEFAULT_PLAYER;
@@ -61,6 +69,7 @@ function getPlayerSnapshot(): PlayerData {
     cachedPlayer = {
       stats: { ...DEFAULT_STATS, ...(legacy || {}), ...(parsed?.stats || {}) },
       watchlist: Array.isArray(parsed?.watchlist) ? parsed.watchlist : [],
+      completedGames: parsed?.completedGames && typeof parsed.completedGames === "object" ? parsed.completedGames : {},
     };
   } catch {
     cachedPlayer = DEFAULT_PLAYER;
@@ -129,9 +138,12 @@ function resultEmoji(guess: Movie, answer: Movie) {
     .join("");
 }
 
-function scoreFor(difficulty: Difficulty, guesses: number, cluesUsed: number) {
-  const config = difficultyConfig(difficulty);
-  return Math.max(100, config.baseScore - Math.max(0, guesses - 1) * config.guessPenalty - cluesUsed * config.cluePenalty);
+function gameHistoryKey(date: string, offset: number, era: Era) {
+  return `${shiftDate(date, -offset)}:${era}`;
+}
+
+function scoreFor(guesses: number, cluesUsed: number) {
+  return Math.max(100, GAME_RULES.baseScore - Math.max(0, guesses - 1) * GAME_RULES.guessPenalty - cluesUsed * GAME_RULES.cluePenalty);
 }
 
 function nextPuzzleCountdown() {
@@ -159,10 +171,10 @@ function MoviePoster({ movie, className = "" }: { movie: Movie; className?: stri
 
   return (
     <span className={`movie-poster ${className}`}>
-      <span className="poster-fallback" aria-hidden="true"><b>{movie.title.slice(0, 1)}</b><small>{movie.year}</small></span>
+      <span className="poster-fallback" aria-hidden="true"><span>Chitram</span><b lang="te">చి</b><small>{movie.year}</small></span>
       {!failed && (
         <Image
-          src={`/api/poster?id=${encodeURIComponent(movie.id)}`}
+          src={`/api/poster?id=${encodeURIComponent(movie.id)}&v=${POSTER_MATCH_VERSION}`}
           alt={`${movie.title} (${movie.year}) poster`}
           fill
           sizes={className === "result-poster" ? "110px" : "60px"}
@@ -190,7 +202,6 @@ function NextMovieCountdown() {
 export default function GameExperience({ initialDate }: { initialDate: string }) {
   const [currentDate, setCurrentDate] = useState(initialDate);
   const [decade, setDecade] = useState<Era>("All");
-  const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   const [mode, setMode] = useState<Mode>("daily");
   const [archiveOffset, setArchiveOffset] = useState(0);
   const [practiceIndex, setPracticeIndex] = useState(3);
@@ -204,7 +215,6 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   const [undoMovie, setUndoMovie] = useState<Movie | null>(null);
   const [pendingGame, setPendingGame] = useState<GameSelection | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState("top");
   const resultRef = useRef<HTMLDivElement>(null);
   const player = useSyncExternalStore(subscribeToPlayer, getPlayerSnapshot, () => DEFAULT_PLAYER);
 
@@ -232,34 +242,18 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   }, [status]);
 
   useEffect(() => {
-    const sections = ["how", "game", "archive", "progress", "vault"]
-      .map((id) => document.getElementById(id))
-      .filter((element): element is HTMLElement => Boolean(element));
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        if (visible?.target.id) setActiveSection(visible.target.id);
-      },
-      { rootMargin: "-24% 0px -58%", threshold: [0, 0.15, 0.35] },
-    );
-    sections.forEach((section) => observer.observe(section));
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
     const id = window.location.hash.slice(1);
     if (!id) return;
     const timer = window.setTimeout(() => {
       const target = document.getElementById(id);
       if (!target) return;
       target.scrollIntoView({ behavior: "auto", block: "start" });
-      setActiveSection(id);
     }, 80);
     return () => window.clearTimeout(timer);
   }, []);
 
   const pool = moviesForEra(decade);
-  const config = difficultyConfig(difficulty);
+  const config = GAME_RULES;
   const answer = useMemo(() => {
     if (mode === "practice") return pool[practiceIndex % pool.length];
     const eraIndex = decade === "All" ? 0 : DECADES.indexOf(decade) + 1;
@@ -293,7 +287,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   const availableClues = clues.filter((clue) => !revealedClueLabels.includes(clue.label) && (!clue.field || !knownClueFields.has(clue.field)));
   const cluesRemaining = Math.max(0, config.maxClues - revealedClueLabels.length);
   const canRevealClue = status === "playing" && cluesRemaining > 0 && availableClues.length > 0;
-  const potentialScore = scoreFor(difficulty, Math.max(1, guesses.length + 1), revealedClueLabels.length);
+  const potentialScore = scoreFor(Math.max(1, guesses.length + 1), revealedClueLabels.length);
   const guessesLeft = config.maxGuesses - guesses.length;
 
   function resetBoard() {
@@ -312,14 +306,12 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     target.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
     target.focus({ preventScroll: true });
-    setActiveSection(id);
   }
 
   function applyGame(next: GameSelection) {
     const nextDecade = next.decade ?? decade;
     const nextMode = next.mode ?? mode;
     setDecade(nextDecade);
-    setDifficulty(next.difficulty ?? difficulty);
     setMode(nextMode);
     setArchiveOffset(next.archiveOffset ?? (nextMode === "archive" ? archiveOffset : 0));
     if (nextMode === "practice") setPracticeIndex(Math.floor(Math.random() * moviesForEra(nextDecade).length));
@@ -330,10 +322,9 @@ export default function GameExperience({ initialDate }: { initialDate: string })
 
   function startGame(next: GameSelection, force = false) {
     const nextDecade = next.decade ?? decade;
-    const nextDifficulty = next.difficulty ?? difficulty;
     const nextMode = next.mode ?? mode;
     const nextArchiveOffset = next.archiveOffset ?? (nextMode === "archive" ? archiveOffset : 0);
-    const changesGame = nextDecade !== decade || nextDifficulty !== difficulty || nextMode !== mode || nextArchiveOffset !== archiveOffset;
+    const changesGame = nextDecade !== decade || nextMode !== mode || nextArchiveOffset !== archiveOffset;
 
     if (!changesGame && !force) return;
     if (guesses.length > 0 && status === "playing" && !force) {
@@ -345,10 +336,21 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   }
 
   function recordResult(won: boolean, guessesUsed: number, score: number) {
+    const completedGames: Record<string, CompletedGame> = mode === "practice" ? player.completedGames : {
+      ...player.completedGames,
+      [gameHistoryKey(currentDate, archiveOffset, decade)]: { result: won ? "won" : "lost", score, guesses: guessesUsed },
+    };
+
+    if (mode === "archive") {
+      savePlayer({ ...player, completedGames });
+      return;
+    }
+
     const distribution = Array.from({ length: 8 }, (_, index) => player.stats.distribution[index] || 0);
     if (won && guessesUsed > 0 && guessesUsed <= distribution.length) distribution[guessesUsed - 1] += 1;
     savePlayer({
       ...player,
+      completedGames,
       stats: {
         played: player.stats.played + 1,
         wins: player.stats.wins + Number(won),
@@ -376,7 +378,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     setHighlight(-1);
     setToast("");
     if (movie.id === answer.id) {
-      const score = scoreFor(difficulty, nextGuesses.length, revealedClueLabels.length);
+      const score = scoreFor(nextGuesses.length, revealedClueLabels.length);
       setStatus("won");
       setFinalScore(score);
       recordResult(true, nextGuesses.length, score);
@@ -403,10 +405,6 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   }
 
   function revealClue() {
-    if (config.maxClues === 0) {
-      setToast("Hard mode has no clues.");
-      return;
-    }
     if (cluesRemaining === 0) {
       setToast(`You have used all ${config.maxClues} clues.`);
       return;
@@ -435,9 +433,8 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   }
 
   async function share() {
-    const gameName = config.name;
     const clueCount = `${revealedClueLabels.length} ${revealedClueLabels.length === 1 ? "clue" : "clues"}`;
-    const text = `Chitram #${puzzleNumber(currentDate) - archiveOffset} · ${gameName} · ${eraLabel(decade)}\n${guesses.map((guess) => resultEmoji(guess, answer)).join("\n")}\n${status === "won" ? `${guesses.length}/${config.maxGuesses} · ${clueCount} · ${finalScore} pts` : `X/${config.maxGuesses}`} · chitram.game`;
+    const text = `Chitram #${puzzleNumber(currentDate) - archiveOffset} · ${eraLabel(decade)}\n${guesses.map((guess) => resultEmoji(guess, answer)).join("\n")}\n${status === "won" ? `${guesses.length}/${config.maxGuesses} · ${clueCount} · ${finalScore} pts` : `X/${config.maxGuesses}`} · chitram.game`;
     try {
       await navigator.clipboard.writeText(text);
       setToast("Result copied. Send it to the group chat.");
@@ -446,7 +443,12 @@ export default function GameExperience({ initialDate }: { initialDate: string })
     }
   }
 
-  const modeLabel = mode === "practice" ? "Unlimited rehearsal" : mode === "archive" ? `${archiveLabel(currentDate, archiveOffset)} archive` : "Today's premiere";
+  const modeLabel = mode === "practice" ? "Unlimited rehearsal" : mode === "archive" ? `Archive puzzle #${puzzleNumber(currentDate) - archiveOffset} · ${archiveLabel(currentDate, archiveOffset)}` : "Today's premiere";
+  const gameSetupLabel = mode === "practice"
+    ? `Practice · ${eraLabel(decade)}`
+    : mode === "archive"
+      ? `Archive #${puzzleNumber(currentDate) - archiveOffset} · ${archiveLabel(currentDate, archiveOffset)} · ${eraLabel(decade)}`
+      : `Daily · ${eraLabel(decade)}`;
   const savedMovies = player.watchlist
     .map((id) => ALL_MOVIES.find((movie) => movie.id === id))
     .filter((movie): movie is Movie => Boolean(movie));
@@ -459,62 +461,47 @@ export default function GameExperience({ initialDate }: { initialDate: string })
       <header className="topbar">
         <div className="topbar-inner">
           <a className="brand wordmark" href="#top" aria-label="Chitram home">Chitram</a>
-          <nav className="main-nav" aria-label="Main navigation">
-            <a className={activeSection === "game" ? "nav-primary" : ""} aria-current={activeSection === "game" ? "location" : undefined} href="#game" onClick={() => setActiveSection("game")}>Play</a>
-            <a className={activeSection === "how" ? "nav-primary" : ""} aria-current={activeSection === "how" ? "location" : undefined} href="#how" onClick={() => setActiveSection("how")}>How it works</a>
-            <a className={activeSection === "archive" ? "nav-primary" : ""} aria-current={activeSection === "archive" ? "location" : undefined} href="#archive" onClick={() => setActiveSection("archive")}>Archive</a>
-            <a className={activeSection === "vault" ? "nav-primary" : ""} aria-current={activeSection === "vault" ? "location" : undefined} href="#vault" onClick={() => setActiveSection("vault")}>Saved <span>{player.watchlist.length}</span></a>
-          </nav>
-          <a className="streak-button" href="#progress" aria-label={`${player.stats.streak} day streak. View progress.`}>
-            <span>{player.stats.streak}</span><small>day streak</small>
-          </a>
         </div>
       </header>
 
       <section className="hero">
         <div className="hero-copy">
-          <div className="eyebrow"><span lang="te">తెలుగు సినిమా</span> Daily movie game · #{puzzleNumber(currentDate)}</div>
-          <h1>Guess the film <em>before the interval.</em></h1>
-          <p>One mystery Telugu movie. Request a clue only when you need one, then use every comparison to find it.</p>
+          <div className="eyebrow"><span lang="te">తెలుగు సినిమా</span><strong>Daily puzzle #{puzzleNumber(currentDate)}</strong></div>
+          <h1>A movie is hiding <em>in plain sight.</em></h1>
+          <p>Name today&apos;s mystery Telugu film. Every guess develops the picture—year, cast, genre and more—until the title comes into focus.</p>
           <div className="hero-actions">
-            <a className="primary-cta" href="#game">Start today&apos;s show <span>→</span></a>
-            <button className="secondary-cta" onClick={() => startGame({ mode: "practice" }, true)}>Play an unlimited practice show</button>
+            <a className="primary-cta" href="#game">Enter the guessing room <span>↘</span></a>
+            <button className="secondary-cta" onClick={() => startGame({ mode: "practice" }, true)}>Try a practice film</button>
           </div>
           <div className="hero-facts">
-            <span><strong>{ALL_MOVIES.length}</strong> films in the reel</span>
-            <span><strong>2000–2026</strong> releases</span>
-            <span><strong>Midnight IST</strong> new show</span>
+            <span><strong>{ALL_MOVIES.length}</strong> films</span>
+            <span><strong>27</strong> years of cinema</span>
+            <span><strong>1</strong> fresh puzzle daily</span>
           </div>
         </div>
         <div className="hero-poster" role="img" aria-label="A typographic poster for today's mystery Telugu movie">
-          <div className="poster-band"><span>First day</span><span>First show</span></div>
-          <div className="poster-title"><small>Today&apos;s mystery</small><strong>సినిమా?</strong></div>
-          <div className="poster-billing"><span>{config.name}</span><span>{config.maxClues || "No"} clues</span><span>{config.maxGuesses} guesses</span></div>
+          <div className="poster-band"><span>Chitram presents</span><span>Daily / #{puzzleNumber(currentDate)}</span></div>
+          <div className="poster-title"><small>Can you name the</small><strong lang="te">సినిమా?</strong></div>
+          <div className="poster-billing"><span>{config.baseScore.toLocaleString("en-IN")} pts</span><span>{config.maxClues} clues</span><span>{config.maxGuesses} takes</span></div>
           <div className="poster-showtime">
-            <span>Next show</span><NextMovieCountdown />
+            <span>Next premiere in</span><NextMovieCountdown />
           </div>
         </div>
       </section>
 
       <section className="game-section section-target" id="game" tabIndex={-1}>
         <div className="section-heading">
-          <div><span className="section-kicker">Today&apos;s show</span><h2>Which Chitram is it?</h2></div>
-          <p>{modeLabel}. {config.description}</p>
+          <div><span className="section-kicker">The guessing room</span><h2>Roll the clues.</h2></div>
+          <p><strong>{modeLabel}.</strong> {config.description}</p>
         </div>
 
         <div className="game-shell">
           {pendingGame && <div className="restart-notice" role="alert"><div><strong>Start a different game?</strong><span>Your current guesses will be cleared.</span></div><div><button type="button" onClick={() => applyGame(pendingGame)}>Start new game</button><button type="button" className="secondary" onClick={() => setPendingGame(null)}>Keep playing</button></div></div>}
           <button className="settings-summary" type="button" aria-controls="game-settings" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((value) => !value)}>
-            <span><small>Game setup</small><strong>{config.name} · {mode === "practice" ? "Practice" : mode === "archive" ? "Archive" : "Daily"} · {eraLabel(decade)}</strong></span>
+            <span><small>Game setup</small><strong>{gameSetupLabel}</strong></span>
             <span aria-hidden="true">{settingsOpen ? "Close −" : "Change +"}</span>
           </button>
           <div className={`game-setup ${settingsOpen ? "open" : ""}`} id="game-settings">
-            <fieldset>
-              <legend>Difficulty</legend>
-              <div className="setup-options difficulty-options">
-                {DIFFICULTIES.map((item) => <button type="button" key={item.id} aria-pressed={difficulty === item.id} className={difficulty === item.id ? "active" : ""} onClick={() => startGame({ difficulty: item.id })}><strong>{item.name}<span>{item.baseScore.toLocaleString("en-IN")} pts</span></strong><small>{item.maxClues ? `Up to ${item.maxClues} clues` : "No clues"} · {item.maxGuesses} guesses</small></button>)}
-              </div>
-            </fieldset>
             <fieldset>
               <legend>Mode</legend>
               <div className="setup-options mode-options">
@@ -532,13 +519,13 @@ export default function GameExperience({ initialDate }: { initialDate: string })
 
           <div className="game-statusbar">
             <div className="run-progress">
-              <span>{config.name} · {guessesLeft} {guessesLeft === 1 ? "guess" : "guesses"} left</span>
+              <span>{guessesLeft} {guessesLeft === 1 ? "guess" : "guesses"} left · −{config.guessPenalty} after each miss</span>
               <div className="take-pips" aria-label={`${guesses.length} of ${config.maxGuesses} guesses used`}>{Array.from({ length: config.maxGuesses }).map((_, index) => <i key={index} className={index < guesses.length ? (guesses[index].id === answer.id ? "won" : "used") : ""} />)}</div>
             </div>
             <div className="score-summary"><span>Score now</span><strong>{potentialScore.toLocaleString("en-IN")}</strong></div>
             <button className="clue-button" type="button" onClick={revealClue} disabled={!canRevealClue}>
-              <strong>{config.maxClues === 0 ? "No clues" : cluesRemaining === 0 ? "Clues used" : availableClues.length === 0 ? "No useful clues" : "Get a clue"}</strong>
-              <small>{config.maxClues === 0 ? "Hard mode" : cluesRemaining === 0 ? "All clues used" : availableClues.length === 0 ? "Already covered by your guesses" : `${cluesRemaining} remaining · −${config.cluePenalty} pts`}</small>
+              <strong>{cluesRemaining === 0 ? "Clues used" : availableClues.length === 0 ? "No useful clues" : "Get a clue"}</strong>
+              <small>{cluesRemaining === 0 ? "All clues used" : availableClues.length === 0 ? "Already covered by your guesses" : `${cluesRemaining} remaining · −${config.cluePenalty} pts`}</small>
             </button>
           </div>
 
@@ -547,15 +534,15 @@ export default function GameExperience({ initialDate }: { initialDate: string })
           <div className="play-area">
             {status === "playing" ? (
               <form className="search-area" onSubmit={(event) => submit(event)}>
-                <div className="search-heading"><label htmlFor="film-search">Your next guess</label><span>Search the Telugu film catalogue</span></div>
+                <div className="search-heading"><label htmlFor="film-search">Put a title on the slate</label><span>Search {pool.length} Telugu films</span></div>
                 {guesses.length > 0 && <div className="guess-memory" aria-label={`${guesses.length} previous guesses`}>
                   <div><span>On your slate</span><small>{guesses.length}/{config.maxGuesses}</small></div>
                   <ol>{guesses.map((guess, index) => <li key={guess.id}><span>{index + 1}</span><strong>{guess.title}</strong><small>{guess.year}</small></li>)}</ol>
                 </div>}
                 <div className="search-box">
                   <span aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="10.5" cy="10.5" r="5.75" /><path d="m15 15 4.25 4.25" /></svg></span>
-                  <input id="film-search" role="combobox" value={query} onChange={(event) => { setQuery(event.target.value); setHighlight(-1); setToast(""); }} onKeyDown={onSearchKeyDown} aria-autocomplete="list" aria-controls="film-suggestions" aria-expanded={suggestions.length > 0} aria-activedescendant={highlight >= 0 && suggestions[highlight] ? `film-option-${suggestions[highlight].id}` : undefined} autoComplete="off" placeholder="Type a movie title" />
-                  <button type="submit">Guess</button>
+                  <input id="film-search" role="combobox" value={query} onChange={(event) => { setQuery(event.target.value); setHighlight(-1); setToast(""); }} onKeyDown={onSearchKeyDown} aria-autocomplete="list" aria-controls="film-suggestions" aria-expanded={suggestions.length > 0} aria-activedescendant={highlight >= 0 && suggestions[highlight] ? `film-option-${suggestions[highlight].id}` : undefined} autoComplete="off" placeholder="Try a film title…" />
+                  <button type="submit">Roll</button>
                 </div>
                 {suggestions.length > 0 && <div className="suggestions" id="film-suggestions" role="listbox" aria-label="Movie suggestions">{suggestions.map((movie, index) => <button type="button" role="option" id={`film-option-${movie.id}`} aria-selected={index === highlight} tabIndex={-1} className={index === highlight ? "highlight" : ""} key={movie.id} onMouseDown={(event) => event.preventDefault()} onClick={() => submit(undefined, movie)}><MoviePoster movie={movie} className="suggestion-poster" /><span className="suggestion-copy"><strong>{movie.title}</strong><small>{movie.director}</small></span><em>{movie.year}</em></button>)}</div>}
               </form>
@@ -569,7 +556,7 @@ export default function GameExperience({ initialDate }: { initialDate: string })
 
             <div className="clue-board">
               <div className="grid-head">{["Year", "Lead", "Director", "Genre", "Movie type", "Title length"].map((column) => <span key={column}>{column}</span>)}</div>
-              {guesses.length === 0 ? <div className="empty-board"><span>Start with any movie you know.</span><small>Your matches will appear here.</small></div> : <div className="guess-list">{guesses.map((guess, row) => {
+              {guesses.length === 0 ? <div className="empty-board"><span>Your first guess opens the scene.</span><small>Exact matches, near misses and wrong turns will appear here.</small></div> : <div className="guess-list">{guesses.map((guess, row) => {
                 const cells = [
                   { field: "year", label: "Year", value: String(guess.year), sub: guess.year === answer.year ? "Year" : guess.year < answer.year ? "↑ Answer is later" : "↓ Answer is earlier" },
                   { field: "hero", label: "Lead", value: guess.hero, sub: getResult("hero", guess, answer) === "close" ? "Related film family" : "Lead actor" },
@@ -590,20 +577,36 @@ export default function GameExperience({ initialDate }: { initialDate: string })
       </section>
 
       <section className="quick-guide section-target" id="how" tabIndex={-1}>
-        <div className="guide-heading"><span>How it plays</span><h2>Read the signals.</h2></div>
+        <div className="guide-heading"><span>Three scenes</span><h2>How the story unfolds.</h2></div>
         <div className="guide-grid">
-          <article><span>01</span><div><strong>Choose your difficulty</strong><p>Request up to 3 clues on Easy, 2 on Medium, or none on Hard.</p></div></article>
-          <article><span>02</span><div><strong>Put a film on the slate</strong><p>Search any Telugu movie, then compare every reveal.</p></div></article>
-          <article><span>03</span><div><strong>Follow the print colours</strong><p><i className="key exact" /> Exact <i className="key close" /> Close <i className="key miss" /> Miss</p></div></article>
+          <article><span>01</span><div><strong>Start at 1,000</strong><p>Everyone gets the same game. Each miss costs 75 points and every clue costs 100.</p></div></article>
+          <article><span>02</span><div><strong>Call your shot</strong><p>Search any film. Each guess compares six signals with the mystery title.</p></div></article>
+          <article><span>03</span><div><strong>Read the colour</strong><p><i className="key exact" /> Exact <i className="key close" /> Close <i className="key miss" /> Miss</p></div></article>
         </div>
       </section>
 
       <section className="library-section section-target" tabIndex={-1}>
-        <div className="section-heading"><div><span className="section-kicker">After the show</span><h2>Your box office.</h2></div><p>Replay a previous show, check your scorecard, or return to movies you saved.</p></div>
+        <div className="section-heading"><div><span className="section-kicker">Your cinema</span><h2>Keep the reel going.</h2></div><p>Revisit an old puzzle, follow your form, or return to a film you saved.</p></div>
         <div className="utility-grid">
           <section className="utility-card archive-card section-target" id="archive" tabIndex={-1}>
             <div className="utility-heading"><div><span>Previous shows</span><h3>Seven days on the reel</h3></div><small>Archive games do not affect your streak.</small></div>
-            <div className="archive-list">{Array.from({ length: 7 }).map((_, index) => <button key={index} onClick={() => startGame({ mode: "archive", archiveOffset: index + 1 })}><span>{archiveLabel(currentDate, index + 1)}</span><strong>#{puzzleNumber(currentDate) - index - 1}</strong><small>Play →</small></button>)}</div>
+            <div className="archive-list">{Array.from({ length: 7 }).map((_, index) => {
+              const offset = index + 1;
+              const completed = player.completedGames[gameHistoryKey(currentDate, offset, decade)];
+              const isCurrent = mode === "archive" && archiveOffset === offset;
+              const stateLabel = isCurrent
+                ? completed ? "Finished · current game" : "Playing now →"
+                : completed
+                  ? completed.result === "won" ? `Finished · ${completed.score.toLocaleString("en-IN")} pts` : "Finished · Try again"
+                  : "Play →";
+              return <button
+                key={offset}
+                className={`${isCurrent ? "current" : ""} ${completed ? "completed" : ""}`.trim()}
+                aria-current={isCurrent ? "true" : undefined}
+                aria-label={`${archiveLabel(currentDate, offset)}, puzzle ${puzzleNumber(currentDate) - offset}. ${stateLabel}`}
+                onClick={() => startGame({ mode: "archive", archiveOffset: offset })}
+              ><span>{archiveLabel(currentDate, offset)}</span><strong>#{puzzleNumber(currentDate) - offset}</strong><small>{stateLabel}</small></button>;
+            })}</div>
           </section>
 
           <section className="utility-card progress-card section-target" id="progress" tabIndex={-1}>

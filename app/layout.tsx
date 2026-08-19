@@ -24,7 +24,7 @@ const siteUrl =
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: { default: "Chitram — The Telugu Cinema Guessing Game", template: "%s | Chitram" },
-  description: "Guess a Telugu film with Easy, Medium, or Hard clues, build your streak, and explore previous daily games.",
+  description: "Guess a Telugu film, spend points on optional clues, build your streak, and explore previous daily games.",
   applicationName: "Chitram",
   alternates: { canonical: "/" },
   category: "game",
@@ -32,14 +32,14 @@ export const metadata: Metadata = {
   formatDetection: { telephone: false },
   openGraph: {
     title: "Chitram — The Telugu Cinema Guessing Game",
-    description: "Choose your clue level. One mystery Telugu film.",
+    description: "One mystery Telugu film. Every guess and clue counts.",
     type: "website",
     images: [{ url: "/og.png", width: 1730, height: 907, alt: "Chitram Telugu movie guessing game" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "Chitram — The Telugu Cinema Guessing Game",
-    description: "Choose your clue level. One mystery Telugu film.",
+    description: "One mystery Telugu film. Every guess and clue counts.",
     images: ["/og.png"],
   },
 };
@@ -47,8 +47,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  colorScheme: "light",
-  themeColor: "#f3e6c8",
+  colorScheme: "dark",
+  themeColor: "#12100f",
 };
 
 export default function RootLayout({

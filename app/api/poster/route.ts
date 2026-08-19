@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ALL_MOVIES, type Movie } from "../../game-data";
+import { ALL_MOVIES, movieLeads, type Movie } from "../../game-data";
 
 type TmdbMovie = {
   id: number;
@@ -15,16 +15,53 @@ type TmdbSearchResponse = {
   results?: TmdbMovie[];
 };
 
+type TmdbPerson = {
+  name: string;
+  original_name?: string;
+  job?: string;
+};
+
+type TmdbCreditsResponse = {
+  cast?: TmdbPerson[];
+  crew?: TmdbPerson[];
+};
+
 const MONTH = 60 * 60 * 24 * 30;
+const MAX_CREDIT_CHECKS = 8;
+
+const PERSON_ALIASES: Record<string, string[]> = {
+  jrntr: ["ntramaraojr", "ntaramaoraojr"],
+  nandamuribalakrishna: ["balakrishna"],
+  saidharamtej: ["saidurghatej"],
+  vijaydeverakonda: ["vijaydevarakonda"],
+  dulquersalmaan: ["dulquersalman"],
+  keerthysuresh: ["keerthisuresh"],
+  sreevishnu: ["srivishnu"],
+};
 
 function normalize(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function movieScore(result: TmdbMovie, movie: Movie) {
+function titleMatches(result: TmdbMovie, movie: Movie) {
   const targets = [movie.title, ...(movie.aliases || [])].map(normalize);
+  return [result.title, result.original_title].some((title) => targets.includes(normalize(title)));
+}
+
+function personMatches(expected: string, actual: string) {
+  const expectedName = normalize(expected);
+  const actualName = normalize(actual);
+  const acceptedNames = [expectedName, ...(PERSON_ALIASES[expectedName] || [])];
+
+  return acceptedNames.some((name) =>
+    name === actualName ||
+    (name.length >= 6 && actualName.length >= 6 && (name.includes(actualName) || actualName.includes(name))),
+  );
+}
+
+function movieScore(result: TmdbMovie, movie: Movie) {
   const releaseYear = Number(result.release_date?.slice(0, 4));
-  const exactTitle = [result.title, result.original_title].some((title) => targets.includes(normalize(title)));
+  const exactTitle = titleMatches(result, movie);
 
   return (
     Number(result.original_language === "te") * 80 +
@@ -35,6 +72,11 @@ function movieScore(result: TmdbMovie, movie: Movie) {
   );
 }
 
+function plausibleCandidate(result: TmdbMovie, movie: Movie) {
+  const releaseYear = Number(result.release_date?.slice(0, 4));
+  return titleMatches(result, movie) || (Number.isFinite(releaseYear) && Math.abs(releaseYear - movie.year) <= 1);
+}
+
 function escapeXml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
@@ -43,7 +85,7 @@ function posterTitleLines(title: string) {
   const lines: string[] = [];
   for (const word of title.trim().split(/\s+/)) {
     const current = lines.at(-1);
-    if (!current || `${current} ${word}`.length > 19) lines.push(word);
+    if (!current || `${current} ${word}`.length > 14) lines.push(word);
     else lines[lines.length - 1] = `${current} ${word}`;
   }
 
@@ -52,41 +94,32 @@ function posterTitleLines(title: string) {
 }
 
 function fallbackPoster(movie: Movie) {
-  const hash = [...movie.id].reduce((value, character) => (value * 31 + character.charCodeAt(0)) >>> 0, 0);
-  const hue = hash % 360;
-  const accentHue = (hue + 38) % 360;
   const titleLines = posterTitleLines(movie.title);
-  const titleStart = 260 - (titleLines.length - 1) * 24;
+  const longestTitleLine = Math.max(...titleLines.map((line) => line.length));
+  const titleFontSize = Math.max(22, Math.min(36, Math.floor(300 / Math.max(1, longestTitleLine * .66))));
+  const titleStart = 250 - (titleLines.length - 1) * 23;
   const titleMarkup = titleLines
-    .map((line, index) => `<text x="171" y="${titleStart + index * 48}" text-anchor="middle">${escapeXml(line)}</text>`)
+    .map((line, index) => `<text x="171" y="${titleStart + index * 46}" text-anchor="middle">${escapeXml(line)}</text>`)
     .join("");
   const safeTitle = escapeXml(movie.title);
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 342 513" role="img" aria-label="${safeTitle} poster">
-      <defs>
-        <radialGradient id="glow" cx="50%" cy="35%" r="75%">
-          <stop offset="0" stop-color="hsl(${accentHue} 64% 34%)"/>
-          <stop offset="0.58" stop-color="hsl(${hue} 52% 17%)"/>
-          <stop offset="1" stop-color="#090706"/>
-        </radialGradient>
-        <linearGradient id="beam" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="#f2cf88" stop-opacity=".34"/>
-          <stop offset="1" stop-color="#f2cf88" stop-opacity="0"/>
-        </linearGradient>
-      </defs>
-      <rect width="342" height="513" fill="url(#glow)"/>
-      <path d="M-30 370 L250 -20 L365 -20 L85 370 Z" fill="url(#beam)" opacity=".32"/>
-      <circle cx="278" cy="104" r="92" fill="none" stroke="#f2cf88" stroke-opacity=".16" stroke-width="18"/>
-      <rect x="18" y="18" width="306" height="477" fill="none" stroke="#e7b457" stroke-opacity=".45"/>
-      <g fill="#e7b457" fill-opacity=".62">
-        <rect x="8" y="34" width="7" height="13"/><rect x="8" y="64" width="7" height="13"/><rect x="8" y="94" width="7" height="13"/>
-        <rect x="327" y="34" width="7" height="13"/><rect x="327" y="64" width="7" height="13"/><rect x="327" y="94" width="7" height="13"/>
+      <rect width="342" height="513" fill="#b73527"/>
+      <rect width="342" height="72" fill="#efb52d"/>
+      <rect y="410" width="342" height="103" fill="#7f241c"/>
+      <g fill="none" stroke="#7f241c" stroke-width="2" opacity=".58">
+        <circle cx="171" cy="240" r="48"/><circle cx="171" cy="240" r="86"/><circle cx="171" cy="240" r="124"/><circle cx="171" cy="240" r="162"/>
       </g>
-      <text x="171" y="82" text-anchor="middle" fill="#e7b457" font-family="Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="4">CHITRAM ARCHIVE</text>
-      <g fill="#f8f0e2" font-family="Georgia, serif" font-size="35" font-weight="700">${titleMarkup}</g>
-      <path d="M88 402 H254" stroke="#e7b457" stroke-opacity=".55"/>
-      <text x="171" y="438" text-anchor="middle" fill="#f1eadc" font-family="Georgia, serif" font-size="32">${movie.year}</text>
-      <text x="171" y="466" text-anchor="middle" fill="#c8bda9" font-family="Arial, sans-serif" font-size="9" letter-spacing="3">TELUGU CINEMA</text>
+      <g fill="#12100f">
+        ${Array.from({ length: 17 }, (_, index) => `<circle cx="${11 + index * 20}" cy="72" r="3"/>`).join("")}
+        ${Array.from({ length: 17 }, (_, index) => `<circle cx="${11 + index * 20}" cy="410" r="3"/>`).join("")}
+      </g>
+      <text x="20" y="33" fill="#12100f" font-family="Arial, sans-serif" font-size="12" font-weight="900" letter-spacing="2">CHITRAM</text>
+      <text x="322" y="33" text-anchor="end" fill="#12100f" font-family="Arial, sans-serif" font-size="9" font-weight="800" letter-spacing="1.5">BASE POSTER</text>
+      <text x="171" y="54" text-anchor="middle" fill="#7f241c" font-family="Arial, sans-serif" font-size="8" font-weight="800" letter-spacing="2.5">TELUGU CINEMA</text>
+      <g fill="#f4ead7" font-family="Arial Black, Arial, sans-serif" font-size="${titleFontSize}" font-weight="900">${titleMarkup}</g>
+      <text x="171" y="461" text-anchor="middle" fill="#f4ead7" font-family="Arial Black, Arial, sans-serif" font-size="34" font-weight="900">${movie.year}</text>
+      <text x="171" y="486" text-anchor="middle" fill="#efb52d" font-family="Arial, sans-serif" font-size="9" font-weight="800" letter-spacing="3">POSTER UNAVAILABLE</text>
     </svg>`;
 
   return new NextResponse(svg, {
@@ -102,6 +135,72 @@ async function searchTmdb(movie: Movie, token: string | undefined, apiKey: strin
   const titleWithoutSubtitle = movie.title.split(/:\s|\s[-–—]\s/)[0];
   const titles = [...new Set([movie.title, ...(movie.aliases || []), titleWithoutSubtitle])].slice(0, 4);
   const results = new Map<number, TmdbMovie>();
+  const creditRequests = new Map<number, Promise<TmdbCreditsResponse | undefined>>();
+
+  function requestHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return headers;
+  }
+
+  async function creditsFor(result: TmdbMovie) {
+    const existing = creditRequests.get(result.id);
+    if (existing) return existing;
+
+    const request = (async () => {
+      try {
+        const url = new URL(`https://api.themoviedb.org/3/movie/${result.id}/credits`);
+        url.searchParams.set("language", "en-US");
+        if (apiKey) url.searchParams.set("api_key", apiKey);
+
+        const response = await fetch(url, {
+          headers: requestHeaders(),
+          next: { revalidate: MONTH },
+        });
+        if (!response.ok) return undefined;
+        return (await response.json()) as TmdbCreditsResponse;
+      } catch {
+        return undefined;
+      }
+    })();
+
+    creditRequests.set(result.id, request);
+    return request;
+  }
+
+  async function bestCastVerifiedResult() {
+    const candidates = [...results.values()]
+      .filter((result) => result.poster_path && plausibleCandidate(result, movie))
+      .sort((a, b) => movieScore(b, movie) - movieScore(a, movie))
+      .slice(0, MAX_CREDIT_CHECKS);
+    const expectedLeads = movieLeads(movie);
+
+    const verified = await Promise.all(candidates.map(async (result) => {
+      const credits = await creditsFor(result);
+      if (!credits?.cast?.length) return undefined;
+
+      const matchedLeads = expectedLeads.filter((lead) =>
+        credits.cast!.some((person) =>
+          [person.name, person.original_name].filter((name): name is string => Boolean(name)).some((name) => personMatches(lead, name)),
+        ),
+      );
+      if (matchedLeads.length !== expectedLeads.length) return undefined;
+
+      const directorMatch = (credits.crew || []).some((person) =>
+        person.job === "Director" &&
+        [person.name, person.original_name].filter((name): name is string => Boolean(name)).some((name) => personMatches(movie.director, name)),
+      );
+
+      return {
+        result,
+        score: movieScore(result, movie) + matchedLeads.length * 350 + Number(directorMatch) * 90,
+      };
+    }));
+
+    return verified
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+      .sort((a, b) => b.score - a.score)[0]?.result;
+  }
 
   async function search(title: string, includeYear: boolean) {
     const url = new URL("https://api.themoviedb.org/3/search/movie");
@@ -112,30 +211,27 @@ async function searchTmdb(movie: Movie, token: string | undefined, apiKey: strin
     if (apiKey) url.searchParams.set("api_key", apiKey);
 
     const response = await fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}`, Accept: "application/json" } : { Accept: "application/json" },
+      headers: requestHeaders(),
       next: { revalidate: MONTH },
     });
 
-    if (!response.ok) return undefined;
+    if (!response.ok) return;
     const data = (await response.json()) as TmdbSearchResponse;
     for (const result of data.results || []) {
       if (result.poster_path) results.set(result.id, result);
     }
-
-    return [...results.values()].sort((a, b) => movieScore(b, movie) - movieScore(a, movie))[0];
   }
 
   for (const title of titles) {
-    const best = await search(title, true);
-    if (best && movieScore(best, movie) >= 300) return best;
+    await search(title, true);
   }
+  const yearMatched = await bestCastVerifiedResult();
+  if (yearMatched) return yearMatched;
 
   for (const title of titles) {
-    const best = await search(title, false);
-    if (best && movieScore(best, movie) >= 300) return best;
+    await search(title, false);
   }
-
-  return [...results.values()].sort((a, b) => movieScore(b, movie) - movieScore(a, movie))[0];
+  return bestCastVerifiedResult();
 }
 
 export async function GET(request: NextRequest) {
@@ -154,6 +250,8 @@ export async function GET(request: NextRequest) {
     const response = NextResponse.redirect(`https://image.tmdb.org/t/p/w342${result.poster_path}`, 307);
     response.headers.set("Cache-Control", `public, s-maxage=${MONTH}, stale-while-revalidate=86400`);
     response.headers.set("X-Poster-Source", "tmdb");
+    response.headers.set("X-Poster-Verified", "cast");
+    response.headers.set("X-TMDB-Movie-Id", String(result.id));
     return response;
   } catch {
     return fallbackPoster(movie);
