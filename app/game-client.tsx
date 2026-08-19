@@ -7,7 +7,7 @@ import { ALL_MOVIES, DECADES, GAME_RULES, MOVIES, movieFamilies, movieLane, movi
 type Mode = "daily" | "practice" | "archive";
 type Result = "match" | "close" | "miss";
 type Era = Decade | "All";
-type ClueField = "year" | "genres" | "director" | "hero" | "lane";
+type ClueField = "year" | "genres" | "director" | "hero" | "lane" | "words";
 type GameSelection = { decade?: Era; mode?: Mode; archiveOffset?: number };
 
 const ERAS: Era[] = ["All", ...DECADES];
@@ -274,12 +274,18 @@ export default function GameExperience({ initialDate }: { initialDate: string })
   const clues: { label: string; value: string; field?: ClueField }[] = [
     { label: "Release year", value: String(answer.year), field: "year" },
     { label: "Genre signal", value: answer.genres.join(" / "), field: "genres" },
-    { label: "Story beat", value: answer.storyClue },
+    ...(answer.storyClueSource === "generated" ? [] : [{ label: "Story beat", value: answer.storyClue }]),
     { label: "The filmmaker", value: answer.director, field: "director" },
     { label: "Lead billing", value: answer.hero, field: "hero" },
+    { label: "Movie type", value: movieLane(answer), field: "lane" },
+    {
+      label: "Title length",
+      value: `${movieTitleWords(answer)} ${movieTitleWords(answer) === 1 ? "word" : "words"}`,
+      field: "words",
+    },
   ];
   const knownClueFields = new Set<ClueField>(
-    (["year", "genres", "director", "hero", "lane"] as ClueField[]).filter((field) =>
+    (["year", "genres", "director", "hero", "lane", "words"] as ClueField[]).filter((field) =>
       guesses.some((guess) => getResult(field, guess, answer) === "match"),
     ),
   );
