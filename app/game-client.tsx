@@ -604,7 +604,7 @@ export default function GameExperience({ initialDate, focused = false }: { initi
           <h1>A movie is hiding <em>in plain sight.</em></h1>
           <p>Name today&apos;s mystery Telugu film. Every guess develops the picture—year, cast, genre and more—until the title comes into focus.</p>
           <div className="hero-actions">
-            <a className="primary-cta" href="#game">Enter the guessing room <span>↘</span></a>
+            <Link className="primary-cta" href="/game" prefetch>Play today&apos;s game <span>→</span></Link>
             <button className="secondary-cta" onClick={() => startGame({ mode: "practice" }, true)}>Try a practice film</button>
           </div>
           <div className="hero-facts">

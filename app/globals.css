@@ -464,7 +464,9 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
     radial-gradient(circle at 12% -5%, #b7352728, transparent 28rem),
     radial-gradient(circle at 96% 104%, #efb52d12, transparent 30rem),
     var(--night);
+  animation: play-page-enter 180ms ease-out both;
 }
+@keyframes play-page-enter { from { opacity: .88; transform: translateY(3px); } }
 .play-page::before {
   content: "";
   position: fixed;
@@ -853,6 +855,29 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 .play-penalties p { margin: 0; color: var(--muted-light); font-size: .64rem; }
 .play-penalties strong { color: var(--cream); }
 
+/* The /game loading boundary mirrors the final layout to prevent route jumps. */
+.play-loading-page { overflow: hidden; }
+.play-loading-stage { padding-top: 30px; }
+.play-loading-options { width: 156px; height: 44px; margin: 0 0 18px auto; border: 1px solid var(--play-line); border-radius: 8px; background: #ffffff0a; }
+.play-loading-title { min-height: 78px; display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; }
+.play-loading-title > div { width: min(520px, 65%); display: grid; gap: 10px; }
+.play-loading-title i, .play-loading-title strong, .play-loading-title > span, .play-loading-progress, .play-loading-search i, .play-loading-search span, .play-loading-board i, .play-loading-board span, .play-loading-clues i, .play-loading-clues span { display: block; border-radius: 8px; background: #ffffff0d; animation: loading-pulse 700ms ease-in-out infinite alternate; }
+.play-loading-title i { width: 170px; height: 13px; }
+.play-loading-title strong { width: min(440px, 100%); height: 55px; }
+.play-loading-title > span { width: 130px; height: 52px; }
+.play-loading-progress { height: 54px; margin-top: 18px; border: 1px solid var(--play-line); border-radius: 11px 11px 0 0; background: var(--play-panel); }
+.play-loading-search { min-height: 104px; padding: 18px; display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 18px; align-items: center; border: 1px solid var(--play-line); border-top: 0; border-radius: 0 0 14px 14px; background: var(--play-panel-raised); }
+.play-loading-search i { width: 130px; height: 32px; }
+.play-loading-search span { height: 64px; background: #f4ead71a; }
+.play-loading-workspace { margin-top: 18px; display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; }
+.play-loading-board, .play-loading-clues { min-height: 390px; padding: 18px; border: 1px solid var(--play-line); border-radius: 14px; background: var(--play-panel); }
+.play-loading-board { display: flex; flex-direction: column; gap: 18px; background: #f4ead712; }
+.play-loading-board i { width: 160px; height: 44px; }
+.play-loading-board span { flex: 1; background: #f4ead710; }
+.play-loading-clues { display: grid; align-content: start; gap: 12px; }
+.play-loading-clues i { width: 110px; height: 44px; }
+.play-loading-clues span { height: 72px; }
+
 @media (min-width: 1800px) {
   .play-stage { padding-top: 38px; }
   .play-workspace { grid-template-columns: minmax(0, 1fr) 360px; }
@@ -939,6 +964,18 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
   .play-cell .play-cell-label { display: block; opacity: .72; }
   .play-cell strong { font-size: .78rem; }
   .play-toast { bottom: max(10px, env(safe-area-inset-bottom)); }
+  .play-loading-stage { padding-top: 20px; }
+  .play-loading-title { min-height: 68px; }
+  .play-loading-title > div { width: 66%; }
+  .play-loading-title strong { height: 44px; }
+  .play-loading-title > span { width: 82px; height: 48px; }
+  .play-loading-progress { height: 48px; margin-top: 14px; }
+  .play-loading-search { min-height: 102px; padding: 12px; grid-template-columns: 1fr; gap: 8px; }
+  .play-loading-search i { width: 120px; height: 18px; }
+  .play-loading-search span { height: 56px; }
+  .play-loading-workspace { display: flex; flex-direction: column; gap: 12px; }
+  .play-loading-clues { min-height: 220px; order: 1; }
+  .play-loading-board { min-height: 310px; order: 2; }
 }
 
 @media (max-width: 390px) {
