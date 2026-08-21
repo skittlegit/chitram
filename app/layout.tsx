@@ -58,6 +58,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://image.tmdb.org" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://image.tmdb.org" />
+      </head>
       <body
         className={`${anek.variable} ${yatra.variable}`}
       >

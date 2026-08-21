@@ -45,7 +45,7 @@ const DEFAULT_STATS: PlayerStats = {
 const DEFAULT_PLAYER: PlayerData = { stats: DEFAULT_STATS, watchlist: [], completedGames: {} };
 const PLAYER_KEY = "chitram-player-v2";
 const PLAYER_EVENT = "chitram-player-change";
-const POSTER_MATCH_VERSION = "cast-v3-unified";
+const POSTER_MATCH_VERSION = "cast-v4-fast";
 
 let cachedPlayerJson: string | null = null;
 let cachedPlayer = DEFAULT_PLAYER;
@@ -169,6 +169,8 @@ function eraLabel(era: Era) {
 
 function MoviePoster({ movie, className = "" }: { movie: Movie; className?: string }) {
   const [failed, setFailed] = useState(false);
+  const isImmediate = className.includes("suggestion") || className.includes("result");
+  const posterSize = className.includes("result") ? "110px" : "60px";
 
   return (
     <span className={`movie-poster ${className}`}>
@@ -178,7 +180,9 @@ function MoviePoster({ movie, className = "" }: { movie: Movie; className?: stri
           src={`/api/poster?id=${encodeURIComponent(movie.id)}&v=${POSTER_MATCH_VERSION}`}
           alt={`${movie.title} (${movie.year}) poster`}
           fill
-          sizes={className === "result-poster" ? "110px" : "60px"}
+          sizes={posterSize}
+          loading={isImmediate ? "eager" : "lazy"}
+          fetchPriority={isImmediate ? "high" : "auto"}
           unoptimized
           onError={() => setFailed(true)}
         />
@@ -462,26 +466,25 @@ export default function GameExperience({ initialDate, focused = false }: { initi
     .filter((movie): movie is Movie => Boolean(movie));
 
   if (focused) {
-    const gameNumber = puzzleNumber(currentDate) - archiveOffset;
     return (
       <main className="play-page" id="top">
         <a className="skip-link" href="#film-search-focused">Skip to movie search</a>
         {toast && <div className="global-toast play-toast" role="status" aria-live="polite"><span>{toast}</span>{undoMovie && <button type="button" onClick={undoVaultRemoval}>Undo</button>}</div>}
 
-        <header className="play-header">
-          <Link className="play-brand wordmark" href="/" aria-label="Chitram home">Chitram</Link>
-          <div className="play-edition" aria-label={`${modeLabel}, puzzle ${gameNumber}`}>
-            <i aria-hidden="true" />
-            <span>{mode === "practice" ? "Practice reel" : mode === "archive" ? "From the archive" : "Today's film"}</span>
-            <strong>#{gameNumber}</strong>
+        <header className="topbar">
+          <div className="topbar-inner">
+            <Link className="brand wordmark" href="/" aria-label="Chitram home">Chitram</Link>
           </div>
-          <button className="play-settings-trigger" type="button" aria-controls="focused-game-settings" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((value) => !value)}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" /></svg>
-            <span>{settingsOpen ? "Close" : gameSetupLabel}</span>
-          </button>
         </header>
 
         <section className="play-stage section-target" id="game" tabIndex={-1}>
+          <div className="play-gamebar">
+            <button className="play-settings-trigger" type="button" aria-controls="focused-game-settings" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((value) => !value)}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" /></svg>
+              <span>{settingsOpen ? "Close game options" : gameSetupLabel}</span>
+            </button>
+          </div>
+
           {pendingGame && <div className="play-restart" role="alert"><div><strong>Switch games?</strong><span>Your current guesses will be cleared.</span></div><div><button type="button" onClick={() => applyGame(pendingGame)}>Start new game</button><button type="button" className="secondary" onClick={() => setPendingGame(null)}>Keep playing</button></div></div>}
 
           <div className={`play-settings-panel ${settingsOpen ? "open" : ""}`} id="focused-game-settings" hidden={!settingsOpen}>

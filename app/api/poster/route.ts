@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { ALL_MOVIES, movieLeads, type Movie } from "../../game-data";
 
 type TmdbMovie = {
@@ -28,6 +29,9 @@ type TmdbCreditsResponse = {
 
 const MONTH = 60 * 60 * 24 * 30;
 const MAX_CREDIT_CHECKS = 8;
+const TMDB_TIMEOUT_MS = 4500;
+const TMDB_POSTER_SIZE = "w185";
+const POSTER_CACHE_CONTROL = `public, max-age=${MONTH}, s-maxage=${MONTH}, stale-while-revalidate=86400`;
 
 const PERSON_ALIASES: Record<string, string[]> = {
   jrntr: ["ntramaraojr", "ntaramaoraojr"],
@@ -125,7 +129,7 @@ function fallbackPoster(movie: Movie) {
   return new NextResponse(svg, {
     headers: {
       "Content-Type": "image/svg+xml; charset=utf-8",
-      "Cache-Control": `public, s-maxage=${MONTH}, stale-while-revalidate=86400`,
+      "Cache-Control": POSTER_CACHE_CONTROL,
       "X-Poster-Source": "fallback",
     },
   });
@@ -156,6 +160,7 @@ async function searchTmdb(movie: Movie, token: string | undefined, apiKey: strin
         const response = await fetch(url, {
           headers: requestHeaders(),
           next: { revalidate: MONTH },
+          signal: AbortSignal.timeout(TMDB_TIMEOUT_MS),
         });
         if (!response.ok) return undefined;
         return (await response.json()) as TmdbCreditsResponse;
@@ -203,55 +208,69 @@ async function searchTmdb(movie: Movie, token: string | undefined, apiKey: strin
   }
 
   async function search(title: string, includeYear: boolean) {
-    const url = new URL("https://api.themoviedb.org/3/search/movie");
-    url.searchParams.set("query", title);
-    if (includeYear) url.searchParams.set("primary_release_year", String(movie.year));
-    url.searchParams.set("include_adult", "false");
-    url.searchParams.set("language", "en-US");
-    if (apiKey) url.searchParams.set("api_key", apiKey);
+    try {
+      const url = new URL("https://api.themoviedb.org/3/search/movie");
+      url.searchParams.set("query", title);
+      if (includeYear) url.searchParams.set("primary_release_year", String(movie.year));
+      url.searchParams.set("include_adult", "false");
+      url.searchParams.set("language", "en-US");
+      if (apiKey) url.searchParams.set("api_key", apiKey);
 
-    const response = await fetch(url, {
-      headers: requestHeaders(),
-      next: { revalidate: MONTH },
-    });
+      const response = await fetch(url, {
+        headers: requestHeaders(),
+        next: { revalidate: MONTH },
+        signal: AbortSignal.timeout(TMDB_TIMEOUT_MS),
+      });
 
-    if (!response.ok) return;
-    const data = (await response.json()) as TmdbSearchResponse;
-    for (const result of data.results || []) {
-      if (result.poster_path) results.set(result.id, result);
+      if (!response.ok) return;
+      const data = (await response.json()) as TmdbSearchResponse;
+      for (const result of data.results || []) {
+        if (result.poster_path) results.set(result.id, result);
+      }
+    } catch {
+      // One slow alias should not prevent other title variants from resolving.
     }
   }
 
-  for (const title of titles) {
-    await search(title, true);
-  }
+  await Promise.all(titles.map((title) => search(title, true)));
   const yearMatched = await bestCastVerifiedResult();
   if (yearMatched) return yearMatched;
 
-  for (const title of titles) {
-    await search(title, false);
-  }
+  await Promise.all(titles.map((title) => search(title, false)));
   return bestCastVerifiedResult();
 }
+
+const resolveVerifiedPoster = unstable_cache(
+  async (movieId: string) => {
+    const movie = ALL_MOVIES.find((item) => item.id === movieId);
+    const token = process.env.TMDB_API_TOKEN;
+    const apiKey = process.env.TMDB_API_KEY;
+    if (!movie || (!token && !apiKey)) return null;
+
+    const result = await searchTmdb(movie, token, apiKey);
+    if (!result?.poster_path) return null;
+    return { path: result.poster_path, tmdbId: result.id };
+  },
+  ["verified-poster-v4"],
+  { revalidate: MONTH },
+);
 
 export async function GET(request: NextRequest) {
   const id = request.nextUrl.searchParams.get("id");
   const movie = ALL_MOVIES.find((item) => item.id === id);
   if (!movie) return new NextResponse("Unknown film", { status: 404 });
 
-  const token = process.env.TMDB_API_TOKEN;
-  const apiKey = process.env.TMDB_API_KEY;
-  if (!token && !apiKey) return fallbackPoster(movie);
+  if (!process.env.TMDB_API_TOKEN && !process.env.TMDB_API_KEY) return fallbackPoster(movie);
 
   try {
-    const result = await searchTmdb(movie, token, apiKey);
-    if (!result?.poster_path) return fallbackPoster(movie);
+    const result = await resolveVerifiedPoster(movie.id);
+    if (!result) return fallbackPoster(movie);
 
-    const response = NextResponse.redirect(`https://image.tmdb.org/t/p/w342${result.poster_path}`, 307);
-    response.headers.set("Cache-Control", `public, s-maxage=${MONTH}, stale-while-revalidate=86400`);
+    const response = NextResponse.redirect(`https://image.tmdb.org/t/p/${TMDB_POSTER_SIZE}${result.path}`, 307);
+    response.headers.set("Cache-Control", POSTER_CACHE_CONTROL);
     response.headers.set("X-Poster-Source", "tmdb");
     response.headers.set("X-Poster-Verified", "cast");
-    response.headers.set("X-TMDB-Movie-Id", String(result.id));
+    response.headers.set("X-TMDB-Movie-Id", String(result.tmdbId));
     return response;
   } catch {
     return fallbackPoster(movie);
