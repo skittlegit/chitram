@@ -1,3 +1,4 @@
+import { Analytics } from "@vercel/analytics/next";
 import type { Metadata, Viewport } from "next";
 import { Anek_Telugu, Yatra_One } from "next/font/google";
 import "./globals.css";
@@ -66,6 +67,7 @@ export default function RootLayout({
         className={`${anek.variable} ${yatra.variable}`}
       >
         {children}
+        <Analytics />
       </body>
     </html>
   );
