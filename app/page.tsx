@@ -1,11 +1,8 @@
-import GameExperience from "./game-client";
+import { indiaDateKey } from "./game-logic";
+import HomeExperience from "./home-experience";
 
 export const dynamic = "force-dynamic";
 
-function indiaDateKey() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
-}
-
 export default function Home() {
-  return <GameExperience initialDate={indiaDateKey()} />;
+  return <HomeExperience initialDate={indiaDateKey()} />;
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import GameExperience from "../game-client";
+import FocusedGame from "../focused-game";
+import { indiaDateKey } from "../game-logic";
 
 export const dynamic = "force-dynamic";
 
@@ -9,10 +10,6 @@ export const metadata: Metadata = {
   alternates: { canonical: "/game" },
 };
 
-function indiaDateKey() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
-}
-
 export default function GamePage() {
-  return <GameExperience initialDate={indiaDateKey()} focused />;
+  return <FocusedGame initialDate={indiaDateKey()} />;
 }
