@@ -1,34 +1,31 @@
 import { ALL_MOVIES, DECADES, GAME_RULES, MOVIES, movieFamilies, movieLane, movieLeads, movieTitleWords, type Decade, type Movie } from "./game-data";
 
-// Pure game rules shared by both game views and the unit tests. Nothing in this
-// module touches React, the DOM, or storage.
+// Pure game rules shared by the client views, the puzzle API and the unit tests.
+// Nothing here touches React, the DOM, or storage. The daily answer itself is
+// chosen in daily-answer.ts, which only server code may import.
 
 export type Mode = "daily" | "practice" | "archive";
 export type Result = "match" | "close" | "miss";
 export type Era = Decade | "All";
 export type ClueField = "year" | "hero" | "director" | "genres" | "lane" | "words";
 export type GameStatus = "playing" | "won" | "lost";
+export type Board = { guessIds: string[]; clueLabels: string[] };
+export type Clue = { label: string; value: string; field?: ClueField };
 
 export const ERAS: Era[] = ["All", ...DECADES];
 export const CLUE_FIELDS: ClueField[] = ["year", "hero", "director", "genres", "lane", "words"];
 export const ARCHIVE_DAYS = 7;
 export const MOVIE_BY_ID = new Map(ALL_MOVIES.map((movie) => [movie.id, movie]));
+export const EMPTY_BOARD: Board = { guessIds: [], clueLabels: [] };
 
 const FIRST_PUZZLE_DATE = "2026-01-01";
 
-export function indiaDateKey(date = new Date()) {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(date);
+export function isEra(value: unknown): value is Era {
+  return typeof value === "string" && (ERAS as string[]).includes(value);
 }
 
-export function normalize(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "")
-    .replace(/aa/g, "a")
-    .replace(/ee/g, "i")
-    .replace(/oo/g, "u")
-    .replace(/th/g, "t")
-    .replace(/sh/g, "s");
+export function indiaDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(date);
 }
 
 export function puzzleNumber(date: string) {
@@ -60,35 +57,83 @@ export function eraLabel(era: Era) {
   return era === "All" ? "All eras" : era;
 }
 
-// FNV-1a with a murmur3 finalizer: cheap, stable across browsers, and well mixed
-// enough that neighbouring ids land far apart in the daily order.
-export function hashString(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  hash ^= hash >>> 16;
-  hash = Math.imul(hash, 0x85ebca6b);
-  hash ^= hash >>> 13;
-  hash = Math.imul(hash, 0xc2b2ae35);
-  hash ^= hash >>> 16;
-  return hash >>> 0;
+// ---------------------------------------------------------------------------
+// Search
+
+// Telugu titles are romanised many ways, so both the query and every title are
+// folded to one spelling: long vowels, aspirated consonants, w/v and doubled
+// letters all collapse ("Pokkiri" and "Pokiri" both become "pokiri").
+export function normalize(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .replace(/aa/g, "a")
+    .replace(/ee/g, "i")
+    .replace(/oo/g, "u")
+    .replace(/th/g, "t")
+    .replace(/sh/g, "s")
+    .replace(/w/g, "v")
+    .replace(/(.)\1+/g, "$1");
 }
 
-// The catalogue is sorted by year and title, so indexing it by puzzle number made
-// consecutive daily answers predictable. Each era instead gets a fixed scrambled
-// order that every player shares and that never repeats within one full cycle.
-const dailyOrders = new Map<Era, Movie[]>();
-
-export function dailyMovie(era: Era, puzzle: number) {
-  let order = dailyOrders.get(era);
-  if (!order) {
-    order = [...moviesForEra(era)].sort((a, b) => hashString(`${era}:${a.id}`) - hashString(`${era}:${b.id}`) || a.id.localeCompare(b.id));
-    dailyOrders.set(era, order);
+// Levenshtein distance with an early exit once every path exceeds `limit`.
+export function editDistance(a: string, b: string, limit = Infinity) {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    let rowMinimum = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + Number(a[i - 1] !== b[j - 1]));
+      rowMinimum = Math.min(rowMinimum, current[j]);
+    }
+    if (rowMinimum > limit) return limit + 1;
+    previous = current;
   }
-  return order[(((puzzle - 1) % order.length) + order.length) % order.length];
+  return previous[b.length];
 }
+
+// 4 exact, 3 prefix, 2 substring, 1 close typo of a word-start prefix, 0 none.
+export function matchScore(movie: Movie, normalizedQuery: string) {
+  let best = 0;
+  for (const name of [movie.title, ...(movie.aliases || [])]) {
+    const normalizedName = normalize(name);
+    if (normalizedName === normalizedQuery) return 4;
+    if (normalizedName.startsWith(normalizedQuery)) best = Math.max(best, 3);
+    else if (normalizedName.includes(normalizedQuery)) best = Math.max(best, 2);
+    else if (best === 0 && normalizedQuery.length >= 4) {
+      const allowed = normalizedQuery.length >= 7 ? 2 : 1;
+      const words = name.trim().split(/\s+/);
+      const typo = words.some((_, index) => {
+        const tail = normalize(words.slice(index).join(""));
+        return editDistance(normalizedQuery, tail.slice(0, normalizedQuery.length), allowed) <= allowed ||
+          editDistance(normalizedQuery, tail, allowed) <= allowed;
+      });
+      if (typo) best = 1;
+    }
+  }
+  return best;
+}
+
+export function searchMovies(pool: Movie[], query: string, excludeIds: string[] = [], limit = 3) {
+  const normalizedQuery = normalize(query);
+  if (!normalizedQuery) return [];
+  return pool
+    .filter((movie) => !excludeIds.includes(movie.id))
+    .map((movie) => ({ movie, score: matchScore(movie, normalizedQuery) }))
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ movie }) => movie);
+}
+
+export function exactMovie(pool: Movie[], query: string) {
+  const normalizedQuery = normalize(query);
+  return normalizedQuery ? pool.find((movie) => matchScore(movie, normalizedQuery) === 4) : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Comparing a guess with the answer
 
 export function getResult(field: ClueField, guess: Movie, answer: Movie): Result {
   if (guess.id === answer.id) return "match";
@@ -144,8 +189,10 @@ export function guessCells(guess: Movie, answer: Movie): GuessCell[] {
   });
 }
 
-export function resultEmoji(guess: Movie, answer: Movie) {
-  return CLUE_FIELDS.map((field) => ({ match: "🟩", close: "🟨", miss: "⬛" })[getResult(field, guess, answer)]).join("");
+const EMOJI: Record<Result, string> = { match: "🟩", close: "🟨", miss: "⬛" };
+
+export function emojiRow(results: Result[]) {
+  return results.map((result) => EMOJI[result]).join("");
 }
 
 export function scoreFor(guesses: number, cluesUsed: number) {
@@ -156,6 +203,56 @@ export function gameStatus(guesses: Movie[], answer: Movie): GameStatus {
   if (guesses.some((guess) => guess.id === answer.id)) return "won";
   return guesses.length >= GAME_RULES.maxGuesses ? "lost" : "playing";
 }
+
+// ---------------------------------------------------------------------------
+// Evaluating a whole board
+
+export function cluesFor(answer: Movie): Clue[] {
+  return [
+    { label: "Release year", value: String(answer.year), field: "year" },
+    { label: "Genre signal", value: answer.genres.join(" / "), field: "genres" },
+    ...(answer.storyClueSource === "generated" ? [] : [{ label: "Story beat", value: answer.storyClue }]),
+    { label: "The filmmaker", value: answer.director, field: "director" },
+    { label: "Lead billing", value: answer.hero, field: "hero" },
+    { label: "Movie type", value: movieLane(answer), field: "lane" },
+    { label: "Title length", value: titleLengthLabel(answer), field: "words" },
+  ];
+}
+
+// Everything a player may see about a board. The answer is withheld until the
+// game is over, so the puzzle API can return this verbatim.
+export type Verdict = {
+  cells: GuessCell[][];
+  status: GameStatus;
+  answer: Movie | null;
+  clues: Clue[];
+  nextClueLabel: string | null;
+  score: number;
+};
+
+// An untouched board reveals nothing about the answer, so the client can show
+// it without asking the server.
+export const OPENING_VERDICT: Verdict = { cells: [], status: "playing", answer: null, clues: [], nextClueLabel: "Release year", score: 0 };
+
+export function evaluateBoard(answer: Movie, board: Board): Verdict {
+  const guesses = board.guessIds.map((id) => MOVIE_BY_ID.get(id)).filter((movie): movie is Movie => Boolean(movie));
+  const status = gameStatus(guesses, answer);
+  const allClues = cluesFor(answer);
+  const knownFields = new Set(CLUE_FIELDS.filter((field) => guesses.some((guess) => getResult(field, guess, answer) === "match")));
+  const available = allClues.filter((clue) => !board.clueLabels.includes(clue.label) && (!clue.field || !knownFields.has(clue.field)));
+
+  return {
+    cells: guesses.map((guess) => guessCells(guess, answer)),
+    status,
+    answer: status === "playing" ? null : answer,
+    clues: allClues.filter((clue) => board.clueLabels.includes(clue.label)),
+    nextClueLabel: available[0]?.label ?? null,
+    score: status === "won" ? scoreFor(guesses.length, board.clueLabels.length) : 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Streaks and countdown
 
 export type StreakState = { streak: number; lastWinDate?: string };
 

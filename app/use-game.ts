@@ -1,30 +1,32 @@
-import { FormEvent, KeyboardEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { ALL_MOVIES, GAME_RULES, movieLane, type Movie } from "./game-data";
+import { FormEvent, KeyboardEvent, RefObject, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ALL_MOVIES, GAME_RULES, type Movie } from "./game-data";
 import {
   archiveLabel,
-  dailyMovie,
   displayedStreak,
+  EMPTY_BOARD,
   eraLabel,
+  evaluateBoard,
+  exactMovie,
   gameHistoryKey,
-  gameStatus,
-  getResult,
   indiaDateKey,
   MOVIE_BY_ID,
   moviesForEra,
-  nextStreak,
-  normalize,
+  OPENING_VERDICT,
   puzzleNumber,
-  resultEmoji,
   scoreFor,
-  titleLengthLabel,
-  type ClueField,
+  searchMovies,
+  type Board,
   type Era,
   type Mode,
+  type Verdict,
 } from "./game-logic";
-import { boardsWith, EMPTY_BOARD, savePlayer, usePlayer, type Board, type CompletedGame, type PlayerData } from "./player-store";
+import { recordResult, updatePlayer, usePlayer, withBoard } from "./player-store";
+import { shareQuery, shareText, sharedResultFrom } from "./share";
 
 export type GameSelection = { decade?: Era; mode?: Mode; archiveOffset?: number };
-export type Clue = { label: string; value: string; field?: ClueField };
+
+type PuzzleRequest = { date: string; offset: number; era: Era; board: Board };
+type RemoteVerdict = { key: string; historyKey: string; verdict: Verdict };
 
 function scrollToSection(id: string) {
   const target = document.getElementById(id);
@@ -34,16 +36,27 @@ function scrollToSection(id: string) {
   target.focus({ preventScroll: true });
 }
 
-function cluesFor(answer: Movie): Clue[] {
-  return [
-    { label: "Release year", value: String(answer.year), field: "year" },
-    { label: "Genre signal", value: answer.genres.join(" / "), field: "genres" },
-    ...(answer.storyClueSource === "generated" ? [] : [{ label: "Story beat", value: answer.storyClue }]),
-    { label: "The filmmaker", value: answer.director, field: "director" },
-    { label: "Lead billing", value: answer.hero, field: "hero" },
-    { label: "Movie type", value: movieLane(answer), field: "lane" },
-    { label: "Title length", value: titleLengthLabel(answer), field: "words" },
-  ];
+const subscribeToNothing = () => () => {};
+
+// False during server rendering and hydration, true afterwards. Saved boards live
+// in localStorage, so until then the game area shows a loading state instead of
+// flashing an empty board that is about to be replaced.
+function useHydrated() {
+  return useSyncExternalStore(subscribeToNothing, () => true, () => false);
+}
+
+function verdictKey(historyKey: string, board: Board) {
+  return JSON.stringify([historyKey, board.guessIds, board.clueLabels]);
+}
+
+async function fetchVerdict({ date, offset, era, board }: PuzzleRequest): Promise<Verdict> {
+  const response = await fetch("/api/puzzle", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ date, offset, era, guessIds: board.guessIds, clueLabels: board.clueLabels }),
+  });
+  if (!response.ok) throw new Error(`Puzzle request failed with ${response.status}`);
+  return response.json();
 }
 
 // The caller owns the result card ref so the returned object holds no refs and
@@ -55,6 +68,9 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
   const [archiveOffset, setArchiveOffset] = useState(0);
   const [practiceIndex, setPracticeIndex] = useState(3);
   const [practiceBoard, setPracticeBoard] = useState<Board>(EMPTY_BOARD);
+  const [remote, setRemote] = useState<RemoteVerdict | null>(null);
+  const [pending, setPending] = useState(false);
+  const [failedLoadKey, setFailedLoadKey] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(-1);
   const [toast, setToast] = useState("");
@@ -63,10 +79,11 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
   const [settingsOpen, setSettingsOpen] = useState(false);
   const gameInProgressRef = useRef(false);
   const player = usePlayer();
+  const hydrated = useHydrated();
 
   useEffect(() => {
     const updateDate = () => {
-      // Never swap the answer out from under a player mid-game at midnight; the
+      // Never swap the puzzle out from under a player mid-game at midnight; the
       // date catches up on the next tick after the game finishes.
       if (gameInProgressRef.current) return;
       const nextDate = indiaDateKey();
@@ -87,54 +104,63 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
   }, [toast]);
 
   const pool = moviesForEra(decade);
-  const answer = useMemo(
-    () => (mode === "practice" ? pool[practiceIndex % pool.length] : dailyMovie(decade, puzzleNumber(currentDate) - archiveOffset)),
-    [archiveOffset, currentDate, decade, mode, pool, practiceIndex],
-  );
+  const practiceAnswer = pool[practiceIndex % pool.length];
+  const puzzle = puzzleNumber(currentDate) - archiveOffset;
 
-  // Daily and archive boards are saved per puzzle, so a refresh resumes the game
-  // and a finished puzzle stays finished instead of being replayable for stats.
-  const boardKey = mode === "practice" ? null : gameHistoryKey(currentDate, archiveOffset, decade);
-  const board = boardKey ? player.boards[boardKey] ?? EMPTY_BOARD : practiceBoard;
-  const guesses = useMemo(
-    () => board.guessIds.map((id) => MOVIE_BY_ID.get(id)).filter((movie): movie is Movie => Boolean(movie)),
-    [board],
-  );
-  const revealedClueLabels = board.clueLabels;
-  const status = gameStatus(guesses, answer);
-  const finalScore = status === "won" ? scoreFor(guesses.length, revealedClueLabels.length) : 0;
+  // Daily and archive boards are saved per puzzle and scored by the server, which
+  // alone knows the answer. Practice boards stay in memory and are scored here.
+  const historyKey = mode === "practice" ? null : gameHistoryKey(currentDate, archiveOffset, decade);
+  const board = historyKey ? player.boards[historyKey] ?? EMPTY_BOARD : practiceBoard;
+  const boardIsEmpty = board.guessIds.length === 0 && board.clueLabels.length === 0;
+  const currentKey = historyKey ? verdictKey(historyKey, board) : null;
+  const practiceVerdict = useMemo(() => evaluateBoard(practiceAnswer, practiceBoard), [practiceAnswer, practiceBoard]);
+
+  let verdict: Verdict | null = null;
+  if (!historyKey) verdict = practiceVerdict;
+  else if (hydrated && boardIsEmpty) verdict = OPENING_VERDICT;
+  else if (hydrated && remote?.historyKey === historyKey) verdict = remote.verdict;
+  const ready = verdict !== null && (!historyKey || boardIsEmpty || remote?.key === currentKey);
+  const loadFailed = currentKey !== null && failedLoadKey === currentKey;
 
   useEffect(() => {
-    gameInProgressRef.current = status === "playing" && guesses.length > 0;
-  }, [guesses.length, status]);
+    if (!historyKey || !currentKey || !hydrated || boardIsEmpty || pending || remote?.key === currentKey || failedLoadKey === currentKey) return;
+    let cancelled = false;
+    fetchVerdict({ date: currentDate, offset: archiveOffset, era: decade, board })
+      .then((result) => {
+        if (!cancelled) setRemote({ key: currentKey, historyKey, verdict: result });
+      })
+      .catch(() => {
+        if (!cancelled) setFailedLoadKey(currentKey);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [archiveOffset, board, boardIsEmpty, currentDate, currentKey, decade, failedLoadKey, historyKey, hydrated, pending, remote?.key]);
+
+  const status = verdict?.status ?? "playing";
+  // While a newer board is being checked, show only the rows already scored.
+  const guesses = board.guessIds
+    .slice(0, verdict?.cells.length ?? 0)
+    .map((id) => MOVIE_BY_ID.get(id))
+    .filter((movie): movie is Movie => Boolean(movie));
+  const cells = verdict?.cells ?? [];
+  const answer = verdict?.answer ?? null;
+  const finalScore = verdict?.score ?? 0;
+  const cluesRemaining = Math.max(0, GAME_RULES.maxClues - board.clueLabels.length);
+  const nextClueLabel = verdict?.nextClueLabel ?? null;
+  const canRevealClue = ready && !pending && status === "playing" && cluesRemaining > 0 && nextClueLabel !== null;
+  const potentialScore = scoreFor(Math.max(1, board.guessIds.length + 1), board.clueLabels.length);
+  const guessesLeft = GAME_RULES.maxGuesses - board.guessIds.length;
+
+  useEffect(() => {
+    gameInProgressRef.current = status === "playing" && board.guessIds.length > 0;
+  }, [board.guessIds.length, status]);
 
   useEffect(() => {
     if (status !== "playing") window.requestAnimationFrame(() => resultRef.current?.focus({ preventScroll: true }));
   }, [resultRef, status]);
 
-  const normalizedQuery = normalize(query);
-  const suggestions = useMemo(() => {
-    if (!normalizedQuery) return [];
-    return pool
-      .filter((movie) => !guesses.some((guess) => guess.id === movie.id))
-      .filter((movie) => [movie.title, ...(movie.aliases || [])].some((name) => normalize(name).includes(normalizedQuery)))
-      .sort((a, b) => Number(normalize(b.title).startsWith(normalizedQuery)) - Number(normalize(a.title).startsWith(normalizedQuery)))
-      .slice(0, 3);
-  }, [guesses, normalizedQuery, pool]);
-
-  const clues = cluesFor(answer);
-  const knownClueFields = new Set(
-    clues
-      .map((clue) => clue.field)
-      .filter((field): field is ClueField => Boolean(field) && guesses.some((guess) => getResult(field!, guess, answer) === "match")),
-  );
-  const visibleClues = clues.filter((clue) => revealedClueLabels.includes(clue.label));
-  const availableClues = clues.filter((clue) => !revealedClueLabels.includes(clue.label) && (!clue.field || !knownClueFields.has(clue.field)));
-  const cluesRemaining = Math.max(0, GAME_RULES.maxClues - revealedClueLabels.length);
-  const canRevealClue = status === "playing" && cluesRemaining > 0 && availableClues.length > 0;
-  const potentialScore = scoreFor(Math.max(1, guesses.length + 1), revealedClueLabels.length);
-  const guessesLeft = GAME_RULES.maxGuesses - guesses.length;
-  const puzzle = puzzleNumber(currentDate) - archiveOffset;
+  const suggestions = useMemo(() => searchMovies(pool, query, board.guessIds), [board.guessIds, pool, query]);
 
   function resetBoard() {
     setQuery("");
@@ -164,7 +190,7 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
 
     if (!changesGame && !force) return;
     // Only practice boards are thrown away; daily and archive boards are saved.
-    if (mode === "practice" && guesses.length > 0 && status === "playing" && !force) {
+    if (mode === "practice" && board.guessIds.length > 0 && status === "playing" && !force) {
       setPendingGame(next);
       scrollToSection("game");
       return;
@@ -172,37 +198,39 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
     applyGame(next);
   }
 
-  function resultUpdate(won: boolean, guessesUsed: number, score: number): Partial<PlayerData> {
-    const completedGames: Record<string, CompletedGame> = mode === "practice" ? player.completedGames : {
-      ...player.completedGames,
-      [gameHistoryKey(currentDate, archiveOffset, decade)]: { result: won ? "won" : "lost", score, guesses: guessesUsed },
-    };
-
-    if (mode === "archive") return { completedGames };
-
-    const distribution = Array.from({ length: GAME_RULES.maxGuesses }, (_, index) => player.stats.distribution[index] || 0);
-    if (won && guessesUsed > 0 && guessesUsed <= distribution.length) distribution[guessesUsed - 1] += 1;
-
-    return {
-      completedGames,
-      stats: {
-        played: player.stats.played + 1,
-        wins: player.stats.wins + Number(won),
-        bestScore: Math.max(player.stats.bestScore, score),
-        points: player.stats.points + score,
-        distribution,
-        ...nextStreak(player.stats, mode, won, currentDate),
-      },
-    };
-  }
-
-  function saveBoard(next: Board, update: Partial<PlayerData> = {}) {
-    if (!boardKey) {
+  // Scores a new board, then saves it (and the result, if the game just ended)
+  // in one update. A daily board is only saved once the server has accepted it.
+  async function commitBoard(next: Board): Promise<Verdict | null> {
+    let result: Verdict;
+    if (!historyKey) {
+      result = evaluateBoard(practiceAnswer, next);
       setPracticeBoard(next);
-      if (Object.keys(update).length) savePlayer({ ...player, ...update });
-      return;
+    } else {
+      setPending(true);
+      try {
+        result = await fetchVerdict({ date: currentDate, offset: archiveOffset, era: decade, board: next });
+      } catch {
+        setToast("Could not reach Chitram. Check your connection and try again.");
+        return null;
+      } finally {
+        setPending(false);
+      }
+      setRemote({ key: verdictKey(historyKey, next), historyKey, verdict: result });
     }
-    savePlayer({ ...player, ...update, boards: boardsWith(player.boards, boardKey, next, currentDate) });
+
+    updatePlayer((current) => {
+      const saved = historyKey ? withBoard(current, historyKey, next, currentDate) : current;
+      if (result.status === "playing") return saved;
+      return recordResult(saved, {
+        mode,
+        historyKey: historyKey ?? "",
+        date: currentDate,
+        won: result.status === "won",
+        guesses: next.guessIds.length,
+        score: result.score,
+      });
+    });
+    return result;
   }
 
   function changeQuery(value: string) {
@@ -211,24 +239,20 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
     setToast("");
   }
 
-  function submit(event?: FormEvent, picked?: Movie) {
+  async function submit(event?: FormEvent, picked?: Movie) {
     event?.preventDefault();
-    if (status !== "playing") return;
-    const exact = pool.find((movie) => [movie.title, ...(movie.aliases || [])].some((name) => normalize(name) === normalizedQuery));
-    const movie = picked || (highlight >= 0 ? suggestions[highlight] : undefined) || exact || suggestions[0];
+    if (!ready || pending || status !== "playing") return;
+    const movie = picked || (highlight >= 0 ? suggestions[highlight] : undefined) || exactMovie(pool, query) || suggestions[0];
     if (!movie) {
       setToast("Choose a film from the suggestions.");
       return;
     }
 
-    const next = { ...board, guessIds: [...board.guessIds, movie.id] };
-    const won = movie.id === answer.id;
-    const finished = won || next.guessIds.length >= GAME_RULES.maxGuesses;
     setQuery("");
     setHighlight(-1);
     setToast("");
-    const score = won ? scoreFor(next.guessIds.length, revealedClueLabels.length) : 0;
-    saveBoard(next, finished ? resultUpdate(won, next.guessIds.length, score) : undefined);
+    const result = await commitBoard({ ...board, guessIds: [...board.guessIds, movie.id] });
+    if (!result) setQuery(movie.title);
   }
 
   function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -246,38 +270,52 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
     }
   }
 
-  function revealClue() {
+  async function revealClue() {
     if (cluesRemaining === 0) {
       setToast(`You have used all ${GAME_RULES.maxClues} clues.`);
       return;
     }
-    const nextClue = availableClues[0];
-    if (!nextClue) {
+    if (!nextClueLabel) {
       setToast("Your guesses already revealed every useful clue.");
       return;
     }
-    saveBoard({ ...board, clueLabels: [...board.clueLabels, nextClue.label] });
-    setToast(`${nextClue.label} revealed. −${GAME_RULES.cluePenalty} points.`);
+    if (!canRevealClue) return;
+    const result = await commitBoard({ ...board, clueLabels: [...board.clueLabels, nextClueLabel] });
+    if (result) setToast(`${nextClueLabel} revealed. −${GAME_RULES.cluePenalty} points.`);
   }
 
   function toggleVault(movie: Movie) {
     const exists = player.watchlist.includes(movie.id);
-    savePlayer({ ...player, watchlist: exists ? player.watchlist.filter((id) => id !== movie.id) : [...player.watchlist, movie.id] });
+    updatePlayer((current) => ({
+      ...current,
+      watchlist: exists ? current.watchlist.filter((id) => id !== movie.id) : [...current.watchlist, movie.id],
+    }));
     setUndoMovie(exists ? movie : null);
     setToast(exists ? "Removed from your vault." : "Saved to your film vault.");
   }
 
   function undoVaultRemoval() {
-    if (!undoMovie || player.watchlist.includes(undoMovie.id)) return;
-    savePlayer({ ...player, watchlist: [...player.watchlist, undoMovie.id] });
-    setToast(`${undoMovie.title} restored.`);
+    if (!undoMovie) return;
+    const movie = undoMovie;
+    updatePlayer((current) => (current.watchlist.includes(movie.id) ? current : { ...current, watchlist: [...current.watchlist, movie.id] }));
+    setToast(`${movie.title} restored.`);
     setUndoMovie(null);
   }
 
   async function share() {
-    const clueCount = `${revealedClueLabels.length} ${revealedClueLabels.length === 1 ? "clue" : "clues"}`;
-    const outcome = status === "won" ? `${guesses.length}/${GAME_RULES.maxGuesses} · ${clueCount} · ${finalScore} pts` : `X/${GAME_RULES.maxGuesses}`;
-    const text = `Chitram #${puzzle} · ${eraLabel(decade)}\n${guesses.map((guess) => resultEmoji(guess, answer)).join("\n")}\n${outcome} · ${window.location.host}`;
+    const result = sharedResultFrom(cells, mode === "practice" ? null : puzzle, decade, board.clueLabels.length, finalScore);
+    const text = shareText(result, `${window.location.origin}/s?${shareQuery(result)}`);
+
+    // Phones get the system share sheet (straight into WhatsApp and friends);
+    // desktops, where that sheet is clumsy, copy to the clipboard instead.
+    if (typeof navigator.share === "function" && window.matchMedia("(pointer: coarse)").matches) {
+      try {
+        await navigator.share({ text });
+        return;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+      }
+    }
     try {
       await navigator.clipboard.writeText(text);
       setToast("Result copied. Send it to the group chat.");
@@ -310,9 +348,14 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
     startGame,
     applyGame,
     // board
+    ready,
+    pending,
+    loadFailed,
+    retryLoad: () => setFailedLoadKey(null),
     pool,
     answer,
     guesses,
+    cells,
     status,
     finalScore,
     potentialScore,
@@ -325,8 +368,8 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
     submit,
     onSearchKeyDown,
     // clues
-    visibleClues,
-    availableClues,
+    visibleClues: verdict?.clues ?? [],
+    hasNextClue: nextClueLabel !== null,
     cluesRemaining,
     canRevealClue,
     revealClue,

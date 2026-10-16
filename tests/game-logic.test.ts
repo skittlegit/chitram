@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ALL_MOVIES, GAME_RULES, MOVIES, type Movie } from "../app/game-data";
+import { dailyAnswer as dailyMovie } from "../app/daily-answer";
 import {
-  dailyMovie,
   displayedStreak,
+  emojiRow,
   gameHistoryKey,
   gameStatus,
   getResult,
@@ -11,7 +12,6 @@ import {
   normalize,
   nextStreak,
   puzzleNumber,
-  resultEmoji,
   scoreFor,
   shiftDate,
 } from "../app/game-logic";
@@ -80,7 +80,7 @@ describe("guess comparison", () => {
   const answer = movie({ id: "a", year: 2012, hero: "Allu Arjun", director: "Sukumar", genres: ["Action", "Drama"], title: "One Two" });
 
   it("marks every field exact for the answer itself", () => {
-    assert.equal(resultEmoji(answer, answer), "🟩🟩🟩🟩🟩🟩");
+    assert.equal(emojiRow(guessCells(answer, answer).map((cell) => cell.result)), "🟩🟩🟩🟩🟩🟩");
   });
 
   it("treats years within two as close", () => {

@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { GAME_RULES } from "./game-data";
-import { ARCHIVE_DAYS, archiveLabel, ERAS, gameHistoryKey, guessCells, puzzleNumber } from "./game-logic";
-import { GameToast, MoviePoster, NextMovieCountdown } from "./game-ui";
+import { ARCHIVE_DAYS, archiveLabel, ERAS, gameHistoryKey, puzzleNumber } from "./game-logic";
+import { GameLoading, GameToast, MoviePoster, NextMovieCountdown, StatsPanel } from "./game-ui";
 import { useGame } from "./use-game";
 
 const GRID_COLUMNS = ["Year", "Lead", "Director", "Genre", "Movie type", "Title length"];
@@ -98,13 +98,13 @@ export default function HomeExperience({ initialDate }: { initialDate: string })
             <div className="run-progress">
               <span>{game.guessesLeft} {game.guessesLeft === 1 ? "guess" : "guesses"} left · −{GAME_RULES.guessPenalty} after each miss</span>
               <div className="take-pips" aria-label={`${guesses.length} of ${GAME_RULES.maxGuesses} guesses used`}>
-                {Array.from({ length: GAME_RULES.maxGuesses }).map((_, index) => <i key={index} className={index < guesses.length ? (guesses[index].id === answer.id ? "won" : "used") : ""} />)}
+                {Array.from({ length: GAME_RULES.maxGuesses }).map((_, index) => <i key={index} className={index < guesses.length ? (status === "won" && index === guesses.length - 1 ? "won" : "used") : ""} />)}
               </div>
             </div>
             <div className="score-summary"><span>Score now</span><strong>{game.potentialScore.toLocaleString("en-IN")}</strong></div>
             <button className="clue-button" type="button" onClick={game.revealClue} disabled={!game.canRevealClue}>
-              <strong>{game.cluesRemaining === 0 ? "Clues used" : game.availableClues.length === 0 ? "No useful clues" : "Get a clue"}</strong>
-              <small>{game.cluesRemaining === 0 ? "All clues used" : game.availableClues.length === 0 ? "Already covered by your guesses" : `${game.cluesRemaining} remaining · −${GAME_RULES.cluePenalty} pts`}</small>
+              <strong>{game.cluesRemaining === 0 ? "Clues used" : !game.hasNextClue ? "No useful clues" : "Get a clue"}</strong>
+              <small>{game.cluesRemaining === 0 ? "All clues used" : !game.hasNextClue ? "Already covered by your guesses" : `${game.cluesRemaining} remaining · −${GAME_RULES.cluePenalty} pts`}</small>
             </button>
           </div>
 
@@ -116,7 +116,9 @@ export default function HomeExperience({ initialDate }: { initialDate: string })
           )}
 
           <div className="play-area">
-            {status === "playing" ? (
+            {!game.ready ? (
+              <GameLoading game={game} />
+            ) : status === "playing" || !answer ? (
               <form className="search-area" onSubmit={(event) => game.submit(event)}>
                 <div className="search-heading"><label htmlFor="film-search">Put a title on the slate</label><span>Search {game.pool.length} Telugu films</span></div>
                 {guesses.length > 0 && (
@@ -140,7 +142,7 @@ export default function HomeExperience({ initialDate }: { initialDate: string })
                     autoComplete="off"
                     placeholder="Try a film title…"
                   />
-                  <button type="submit">Roll</button>
+                  <button type="submit" disabled={game.pending}>{game.pending ? "Checking…" : "Roll"}</button>
                 </div>
                 {game.suggestions.length > 0 && (
                   <div className="suggestions" id="film-suggestions" role="listbox" aria-label="Movie suggestions">
@@ -179,7 +181,7 @@ export default function HomeExperience({ initialDate }: { initialDate: string })
                     <div className="guess-row" key={guess.id}>
                       <div className="guess-title"><span>Guess {row + 1}</span><strong>{guess.title}</strong></div>
                       <div className="cells">
-                        {guessCells(guess, answer).map((cell, index) => (
+                        {game.cells[row].map((cell, index) => (
                           <div className={`cell ${cell.result}`} aria-label={`${cell.label}: ${cell.value}. ${cell.resultLabel}. ${cell.note}.`} style={{ animationDelay: `${index * 45}ms` }} key={cell.field}>
                             <small className="cell-label">{cell.label}</small>
                             <strong>{cell.value}</strong>
@@ -236,12 +238,7 @@ export default function HomeExperience({ initialDate }: { initialDate: string })
 
           <section className="utility-card progress-card section-target" id="progress" tabIndex={-1}>
             <div className="utility-heading"><div><span>Scorecard</span><h3>Your box office</h3></div></div>
-            <div className="stats-grid">
-              <div><strong>{player.stats.played}</strong><span>Played</span></div>
-              <div><strong>{player.stats.played ? Math.round(player.stats.wins / player.stats.played * 100) : 0}%</strong><span>Win rate</span></div>
-              <div><strong>{game.streak}</strong><span>Streak</span></div>
-              <div><strong>{player.stats.bestScore.toLocaleString("en-IN")}</strong><span>Best score</span></div>
-            </div>
+            <StatsPanel stats={player.stats} streak={game.streak} highlight={status === "won" ? guesses.length : undefined} />
           </section>
 
           <section className="utility-card vault-card section-target" id="vault" tabIndex={-1}>

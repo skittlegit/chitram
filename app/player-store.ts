@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { ARCHIVE_DAYS, shiftDate } from "./game-logic";
+import { GAME_RULES } from "./game-data";
+import { ARCHIVE_DAYS, nextStreak, shiftDate, type Board, type Mode } from "./game-logic";
 
 // Device-local player data, kept in localStorage and read through
 // useSyncExternalStore so every mounted view and other tabs stay in sync.
@@ -20,11 +21,6 @@ export type CompletedGame = {
   guesses: number;
 };
 
-export type Board = {
-  guessIds: string[];
-  clueLabels: string[];
-};
-
 export type PlayerData = {
   stats: PlayerStats;
   watchlist: string[];
@@ -38,10 +34,9 @@ const DEFAULT_STATS: PlayerStats = {
   streak: 0,
   bestScore: 0,
   points: 0,
-  distribution: [0, 0, 0, 0, 0, 0, 0, 0],
+  distribution: Array.from({ length: GAME_RULES.maxGuesses }, () => 0),
 };
 export const DEFAULT_PLAYER: PlayerData = { stats: DEFAULT_STATS, watchlist: [], completedGames: {}, boards: {} };
-export const EMPTY_BOARD: Board = { guessIds: [], clueLabels: [] };
 
 const PLAYER_KEY = "chitram-player-v2";
 const LEGACY_STATS_KEY = "chitram-stats";
@@ -83,8 +78,11 @@ function getPlayerSnapshot(): PlayerData {
   return cachedPlayer;
 }
 
-export function savePlayer(next: PlayerData) {
-  localStorage.setItem(PLAYER_KEY, JSON.stringify(next));
+// Always derive the next state from what is stored right now, not from a value
+// captured before an await, so concurrent updates (another tab, a vault toggle
+// while a guess is being checked) are never overwritten.
+export function updatePlayer(update: (current: PlayerData) => PlayerData) {
+  localStorage.setItem(PLAYER_KEY, JSON.stringify(update(getPlayerSnapshot())));
   window.dispatchEvent(new Event(PLAYER_EVENT));
 }
 
@@ -94,8 +92,43 @@ export function usePlayer() {
 
 // Boards older than the archive window can never be shown again, so drop them
 // whenever a board is written to keep localStorage small.
-export function boardsWith(boards: PlayerData["boards"], key: string, board: Board, today: string) {
+export function withBoard(player: PlayerData, key: string, board: Board, today: string): PlayerData {
   const oldestKept = shiftDate(today, -(ARCHIVE_DAYS + 1));
-  const kept = Object.fromEntries(Object.entries(boards).filter(([boardKey]) => boardKey.slice(0, 10) >= oldestKept));
-  return { ...kept, [key]: board };
+  const kept = Object.fromEntries(Object.entries(player.boards).filter(([boardKey]) => boardKey.slice(0, 10) >= oldestKept));
+  return { ...player, boards: { ...kept, [key]: board } };
+}
+
+export type FinishedGame = {
+  mode: Mode;
+  historyKey: string;
+  date: string;
+  won: boolean;
+  guesses: number;
+  score: number;
+};
+
+export function recordResult(player: PlayerData, game: FinishedGame): PlayerData {
+  if (game.mode !== "practice" && player.completedGames[game.historyKey]) return player;
+
+  const completedGames = game.mode === "practice" ? player.completedGames : {
+    ...player.completedGames,
+    [game.historyKey]: { result: game.won ? "won" : "lost", score: game.score, guesses: game.guesses } satisfies CompletedGame,
+  };
+  if (game.mode === "archive") return { ...player, completedGames };
+
+  const distribution = Array.from({ length: GAME_RULES.maxGuesses }, (_, index) => player.stats.distribution[index] || 0);
+  if (game.won && game.guesses > 0 && game.guesses <= distribution.length) distribution[game.guesses - 1] += 1;
+
+  return {
+    ...player,
+    completedGames,
+    stats: {
+      played: player.stats.played + 1,
+      wins: player.stats.wins + Number(game.won),
+      bestScore: Math.max(player.stats.bestScore, game.score),
+      points: player.stats.points + game.score,
+      distribution,
+      ...nextStreak(player.stats, game.mode, game.won, game.date),
+    },
+  };
 }

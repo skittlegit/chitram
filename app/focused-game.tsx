@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useRef } from "react";
 import { GAME_RULES } from "./game-data";
-import { ERAS, guessCells } from "./game-logic";
-import { GameToast, MoviePoster } from "./game-ui";
+import { ERAS } from "./game-logic";
+import { GameLoading, GameToast, MoviePoster, StatsPanel } from "./game-ui";
 import { useGame } from "./use-game";
 
 const GRID_COLUMNS = ["Year", "Lead", "Director", "Genre", "Movie type", "Title length"];
@@ -79,14 +79,16 @@ export default function FocusedGame({ initialDate }: { initialDate: string }) {
             <span>Take</span>
             <div aria-label={`${guesses.length} of ${GAME_RULES.maxGuesses} guesses used`}>
               {Array.from({ length: GAME_RULES.maxGuesses }).map((_, index) => (
-                <i key={index} className={index < guesses.length ? (guesses[index].id === answer.id ? "won" : "used") : ""}><span>{index + 1}</span></i>
+                <i key={index} className={index < guesses.length ? (status === "won" && index === guesses.length - 1 ? "won" : "used") : ""}><span>{index + 1}</span></i>
               ))}
             </div>
           </div>
           <p><i className="key exact" /> Exact <i className="key close" /> Close <i className="key miss" /> Miss</p>
         </div>
 
-        {status === "playing" ? (
+        {!game.ready ? (
+          <GameLoading game={game} />
+        ) : status === "playing" || !answer ? (
           <form className="play-search" onSubmit={(event) => game.submit(event)}>
             <label htmlFor="film-search-focused"><strong>Make your guess</strong><small>Search {game.pool.length} Telugu films</small></label>
             <div className="play-search-control">
@@ -105,7 +107,7 @@ export default function FocusedGame({ initialDate }: { initialDate: string }) {
                 autoFocus
                 placeholder="Type a movie title..."
               />
-              <button type="submit">Guess <span aria-hidden="true">→</span></button>
+              <button type="submit" disabled={game.pending}>{game.pending ? "Checking…" : <>Guess <span aria-hidden="true">→</span></>}</button>
             </div>
             {game.suggestions.length > 0 && (
               <div className="play-suggestions" id="focused-film-suggestions" role="listbox" aria-label="Movie suggestions">
@@ -148,7 +150,7 @@ export default function FocusedGame({ initialDate }: { initialDate: string }) {
                   <article className="play-guess" key={guess.id}>
                     <div className="play-guess-title"><span>{String(row + 1).padStart(2, "0")}</span><strong>{guess.title}</strong></div>
                     <div className="play-cells">
-                      {guessCells(guess, answer).map((cell, index) => (
+                      {game.cells[row].map((cell, index) => (
                         <div className={`play-cell ${cell.result}`} aria-label={`${cell.label}: ${cell.value}. ${cell.resultLabel}. ${cell.note}.`} style={{ animationDelay: `${index * 45}ms` }} key={cell.field}>
                           <small className="play-cell-label">{cell.label}</small>
                           <strong>{cell.value}</strong>
@@ -166,8 +168,8 @@ export default function FocusedGame({ initialDate }: { initialDate: string }) {
             <div className="play-panel-heading compact"><div><span>Need a nudge?</span><h2>Clues</h2></div><strong>{game.cluesRemaining}<small> left</small></strong></div>
             <button className="play-clue-button" type="button" onClick={game.revealClue} disabled={!game.canRevealClue}>
               <span>
-                <strong>{game.cluesRemaining === 0 ? "All clues used" : game.availableClues.length === 0 ? "Nothing new to reveal" : "Reveal next clue"}</strong>
-                <small>{game.cluesRemaining === 0 ? "Keep guessing" : game.availableClues.length === 0 ? "Your guesses covered them" : `Costs ${GAME_RULES.cluePenalty} points`}</small>
+                <strong>{game.cluesRemaining === 0 ? "All clues used" : !game.hasNextClue ? "Nothing new to reveal" : "Reveal next clue"}</strong>
+                <small>{game.cluesRemaining === 0 ? "Keep guessing" : !game.hasNextClue ? "Your guesses covered them" : `Costs ${GAME_RULES.cluePenalty} points`}</small>
               </span>
               <b aria-hidden="true">?</b>
             </button>
@@ -179,6 +181,12 @@ export default function FocusedGame({ initialDate }: { initialDate: string }) {
             <div className="play-penalties"><span>Scoring</span><p><strong>−{GAME_RULES.guessPenalty}</strong> each extra guess</p><p><strong>−{GAME_RULES.cluePenalty}</strong> each clue</p></div>
           </aside>
         </div>
+        {status !== "playing" && (
+          <section className="play-stats" aria-labelledby="play-stats-title">
+            <h2 id="play-stats-title">Your box office</h2>
+            <StatsPanel stats={game.player.stats} streak={game.streak} highlight={status === "won" ? guesses.length : undefined} />
+          </section>
+        )}
       </section>
     </main>
   );
