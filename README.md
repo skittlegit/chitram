@@ -34,10 +34,19 @@ To enable real poster art, copy `.env.example` to `.env.local` and add a TMDB AP
 ## Scripts
 
 - `npm run dev` starts the local Next.js server.
-- `npm run build` creates a production build.
+- `npm run build` checks the movie catalogue, then creates a production build.
 - `npm start` serves the production build.
 - `npm run lint` checks the source.
-- `npm test` runs lint and a production build.
+- `npm run test:unit` runs the game-rule and catalogue tests in `tests/`.
+- `npm test` runs lint, the unit tests, and a production build.
+
+## Code layout
+
+- `app/game-data.ts`, `app/movie-catalog.ts`, `app/movie-story-clues.ts`: the film catalogue.
+- `app/game-logic.ts`: pure game rules (daily answer, guess comparison, scoring, streaks).
+- `app/player-store.ts`: device-local stats, saved boards, and the film vault.
+- `app/use-game.ts`: the game state and actions shared by both views.
+- `app/home-experience.tsx` (`/`) and `app/focused-game.tsx` (`/game`): the two page views.
 
 ## Deploy on Vercel
 
