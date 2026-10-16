@@ -10,7 +10,10 @@ A premium Telugu cinema guessing game built with the Next.js App Router.
 - Daily challenge, unlimited practice, and a seven-day archive.
 - Play by decade or use All for the complete 2000s–2020s catalogue.
 - Automatic, colour-coded year, lead and film-family, director, genre, film-lane, and title-size clues after every guess.
-- Device-local streaks, win rate, points, and best score.
+- The daily answer is chosen and scored on the server, so it never ships to the browser; progress resumes after a refresh.
+- Typo-tolerant search that folds common Telugu romanisations (Pokkiri/Pokiri, Seetha/Sitha).
+- Device-local streaks, win rate, points, best score, and a wins-by-guesses chart.
+- Share results through the phone share sheet, with a link preview image of your grid.
 - A device-local film vault for saving revealed movies.
 - Cast-verified TMDB poster art in search results, film reveals, and the vault, with a built-in fallback when no verified poster is available.
 - 736 Telugu films from 2000 through 2026, with strong filmography coverage for 20 established mainstream leads plus a curated set of recognisable breakout hits and cult favourites.
@@ -37,13 +40,17 @@ To enable real poster art, copy `.env.example` to `.env.local` and add a TMDB AP
 - `npm run build` checks the movie catalogue, then creates a production build.
 - `npm start` serves the production build.
 - `npm run lint` checks the source.
-- `npm run test:unit` runs the game-rule and catalogue tests in `tests/`.
+- `npm run test:unit` runs the game-rule, search, API, and catalogue tests in `tests/`.
+- `npm run test:e2e` runs the Playwright browser tests in `e2e/` against a production build (run `npm run build` first). Locally they drive your installed Google Chrome.
 - `npm test` runs lint, the unit tests, and a production build.
 
 ## Code layout
 
 - `app/game-data.ts`, `app/movie-catalog.ts`, `app/movie-story-clues.ts`: the film catalogue.
-- `app/game-logic.ts`: pure game rules (daily answer, guess comparison, scoring, streaks).
+- `app/game-logic.ts`: pure game rules (search, guess comparison, board scoring, streaks).
+- `app/daily-answer.ts`: the secret-keyed daily pick. Server code only; never import it from a client component.
+- `app/api/puzzle/route.ts`: scores daily and archive boards without revealing the answer early.
+- `app/share.ts`, `app/s/`: share links, the shared-result page, and its preview image.
 - `app/player-store.ts`: device-local stats, saved boards, and the film vault.
 - `app/use-game.ts`: the game state and actions shared by both views.
 - `app/home-experience.tsx` (`/`) and `app/focused-game.tsx` (`/game`): the two page views.
@@ -52,4 +59,10 @@ To enable real poster art, copy `.env.example` to `.env.local` and add a TMDB AP
 
 Import this repository into Vercel. It detects Next.js automatically, so no framework override or custom build command is required.
 
+**Set `DAILY_SECRET`** in the Vercel project environment to a long random value (for example the output of `openssl rand -hex 32`). It keeps the daily answers unguessable. Changing it changes every answer, so set it once before launch. Without it, a public development key is used and a warning is logged.
+
 Set `TMDB_API_TOKEN` in the Vercel project environment to enable posters. A TMDB v3 `TMDB_API_KEY` is also supported as an alternative. Optionally set `NEXT_PUBLIC_SITE_URL` to the canonical production URL (for example, `https://chitram.example.com`). Production deployments also use Vercel's provided production URL automatically.
+
+To see visitor counts, enable Web Analytics in the Vercel project. The app already includes the cookieless `@vercel/analytics` script.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs lint, type checks, unit tests, the build, and the Playwright tests on every push and pull request.

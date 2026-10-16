@@ -33,3 +33,11 @@ yarn-error.log*
 
 # vercel
 .vercel
+
+# local Claude Code skills (kept on disk, not part of the app)
+/.claude/skills/
+
+# playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
