@@ -20,6 +20,7 @@ type PlayerStats = {
   bestScore: number;
   points: number;
   distribution: number[];
+  lastWinDate?: string;
 };
 
 type CompletedGame = {
@@ -28,10 +29,16 @@ type CompletedGame = {
   guesses: number;
 };
 
+type Board = {
+  guessIds: string[];
+  clueLabels: string[];
+};
+
 type PlayerData = {
   stats: PlayerStats;
   watchlist: string[];
   completedGames: Record<string, CompletedGame>;
+  boards: Record<string, Board>;
 };
 
 const DEFAULT_STATS: PlayerStats = {
@@ -42,10 +49,13 @@ const DEFAULT_STATS: PlayerStats = {
   points: 0,
   distribution: [0, 0, 0, 0, 0, 0, 0, 0],
 };
-const DEFAULT_PLAYER: PlayerData = { stats: DEFAULT_STATS, watchlist: [], completedGames: {} };
+const DEFAULT_PLAYER: PlayerData = { stats: DEFAULT_STATS, watchlist: [], completedGames: {}, boards: {} };
+const EMPTY_BOARD: Board = { guessIds: [], clueLabels: [] };
 const PLAYER_KEY = "chitram-player-v2";
 const PLAYER_EVENT = "chitram-player-change";
-const POSTER_MATCH_VERSION = "cast-v4-fast";
+const POSTER_MATCH_VERSION = "cast-v5";
+const ARCHIVE_DAYS = 7;
+const MOVIE_BY_ID = new Map(ALL_MOVIES.map((movie) => [movie.id, movie]));
 
 let cachedPlayerJson: string | null = null;
 let cachedPlayer = DEFAULT_PLAYER;
@@ -71,6 +81,7 @@ function getPlayerSnapshot(): PlayerData {
       stats: { ...DEFAULT_STATS, ...(legacy || {}), ...(parsed?.stats || {}) },
       watchlist: Array.isArray(parsed?.watchlist) ? parsed.watchlist : [],
       completedGames: parsed?.completedGames && typeof parsed.completedGames === "object" ? parsed.completedGames : {},
+      boards: parsed?.boards && typeof parsed.boards === "object" ? parsed.boards : {},
     };
   } catch {
     cachedPlayer = DEFAULT_PLAYER;
@@ -163,6 +174,36 @@ function moviesForEra(era: Era) {
   return era === "All" ? ALL_MOVIES : MOVIES[era];
 }
 
+// FNV-1a with a murmur3 finalizer: cheap, stable across browsers, and well mixed
+// enough that neighbouring ids land far apart in the daily order.
+function hashString(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x85ebca6b);
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, 0xc2b2ae35);
+  hash ^= hash >>> 16;
+  return hash >>> 0;
+}
+
+// The catalogue is sorted by year and title, so indexing it by puzzle number made
+// consecutive daily answers predictable. Each era instead gets a fixed scrambled
+// order that every player shares and that never repeats within one full cycle.
+const dailyOrders = new Map<Era, Movie[]>();
+
+function dailyMovie(era: Era, puzzle: number) {
+  let order = dailyOrders.get(era);
+  if (!order) {
+    order = [...moviesForEra(era)].sort((a, b) => hashString(`${era}:${a.id}`) - hashString(`${era}:${b.id}`) || a.id.localeCompare(b.id));
+    dailyOrders.set(era, order);
+  }
+  return order[(((puzzle - 1) % order.length) + order.length) % order.length];
+}
+
 function eraLabel(era: Era) {
   return era === "All" ? "All eras" : era;
 }
@@ -211,20 +252,21 @@ export default function GameExperience({ initialDate, focused = false }: { initi
   const [archiveOffset, setArchiveOffset] = useState(0);
   const [practiceIndex, setPracticeIndex] = useState(3);
   const [query, setQuery] = useState("");
-  const [guesses, setGuesses] = useState<Movie[]>([]);
-  const [status, setStatus] = useState<"playing" | "won" | "lost">("playing");
+  const [practiceBoard, setPracticeBoard] = useState<Board>(EMPTY_BOARD);
   const [highlight, setHighlight] = useState(-1);
-  const [revealedClueLabels, setRevealedClueLabels] = useState<string[]>([]);
-  const [finalScore, setFinalScore] = useState(0);
   const [toast, setToast] = useState("");
   const [undoMovie, setUndoMovie] = useState<Movie | null>(null);
   const [pendingGame, setPendingGame] = useState<GameSelection | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const resultRef = useRef<HTMLDivElement>(null);
+  const gameInProgressRef = useRef(false);
   const player = useSyncExternalStore(subscribeToPlayer, getPlayerSnapshot, () => DEFAULT_PLAYER);
 
   useEffect(() => {
     const updateDate = () => {
+      // Never swap the answer out from under a player mid-game at midnight; the
+      // date catches up on the next tick after the game finishes.
+      if (gameInProgressRef.current) return;
       const nextDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
       setCurrentDate((value) => (value === nextDate ? value : nextDate));
     };
@@ -242,6 +284,31 @@ export default function GameExperience({ initialDate, focused = false }: { initi
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  const pool = moviesForEra(decade);
+  const config = GAME_RULES;
+  const answer = useMemo(
+    () => (mode === "practice" ? pool[practiceIndex % pool.length] : dailyMovie(decade, puzzleNumber(currentDate) - archiveOffset)),
+    [archiveOffset, currentDate, decade, mode, pool, practiceIndex],
+  );
+
+  // Daily and archive boards are saved per puzzle, so a refresh resumes the game
+  // and a finished puzzle stays finished instead of being replayable for stats.
+  const boardKey = mode === "practice" ? null : gameHistoryKey(currentDate, archiveOffset, decade);
+  const board = boardKey ? player.boards[boardKey] ?? EMPTY_BOARD : practiceBoard;
+  const guesses = useMemo(
+    () => board.guessIds.map((id) => MOVIE_BY_ID.get(id)).filter((movie): movie is Movie => Boolean(movie)),
+    [board],
+  );
+  const revealedClueLabels = board.clueLabels;
+  const status: "playing" | "won" | "lost" = guesses.some((guess) => guess.id === answer.id)
+    ? "won"
+    : guesses.length >= GAME_RULES.maxGuesses ? "lost" : "playing";
+  const finalScore = status === "won" ? scoreFor(guesses.length, revealedClueLabels.length) : 0;
+
+  useEffect(() => {
+    gameInProgressRef.current = status === "playing" && guesses.length > 0;
+  }, [guesses.length, status]);
+
   useEffect(() => {
     if (status !== "playing") window.requestAnimationFrame(() => resultRef.current?.focus({ preventScroll: true }));
   }, [status]);
@@ -256,15 +323,6 @@ export default function GameExperience({ initialDate, focused = false }: { initi
     }, 80);
     return () => window.clearTimeout(timer);
   }, []);
-
-  const pool = moviesForEra(decade);
-  const config = GAME_RULES;
-  const answer = useMemo(() => {
-    if (mode === "practice") return pool[practiceIndex % pool.length];
-    const eraIndex = decade === "All" ? 0 : DECADES.indexOf(decade) + 1;
-    const seed = puzzleNumber(currentDate) - archiveOffset + eraIndex * 17;
-    return pool[Math.abs(seed) % pool.length];
-  }, [archiveOffset, currentDate, decade, mode, pool, practiceIndex]);
 
   const normalizedQuery = normalize(query);
   const suggestions = useMemo(() => {
@@ -303,11 +361,8 @@ export default function GameExperience({ initialDate, focused = false }: { initi
 
   function resetBoard() {
     setQuery("");
-    setGuesses([]);
-    setStatus("playing");
+    setPracticeBoard(EMPTY_BOARD);
     setHighlight(-1);
-    setRevealedClueLabels([]);
-    setFinalScore(0);
     setToast("");
   }
 
@@ -339,7 +394,8 @@ export default function GameExperience({ initialDate, focused = false }: { initi
     const changesGame = nextDecade !== decade || nextMode !== mode || nextArchiveOffset !== archiveOffset;
 
     if (!changesGame && !force) return;
-    if (guesses.length > 0 && status === "playing" && !force) {
+    // Only practice boards are thrown away; daily and archive boards are saved.
+    if (mode === "practice" && guesses.length > 0 && status === "playing" && !force) {
       setPendingGame(next);
       scrollToSection("game");
       return;
@@ -347,31 +403,47 @@ export default function GameExperience({ initialDate, focused = false }: { initi
     applyGame(next);
   }
 
-  function recordResult(won: boolean, guessesUsed: number, score: number) {
+  function resultUpdate(won: boolean, guessesUsed: number, score: number): Partial<PlayerData> {
     const completedGames: Record<string, CompletedGame> = mode === "practice" ? player.completedGames : {
       ...player.completedGames,
       [gameHistoryKey(currentDate, archiveOffset, decade)]: { result: won ? "won" : "lost", score, guesses: guessesUsed },
     };
 
-    if (mode === "archive") {
-      savePlayer({ ...player, completedGames });
-      return;
-    }
+    if (mode === "archive") return { completedGames };
 
     const distribution = Array.from({ length: 8 }, (_, index) => player.stats.distribution[index] || 0);
     if (won && guessesUsed > 0 && guessesUsed <= distribution.length) distribution[guessesUsed - 1] += 1;
-    savePlayer({
-      ...player,
+
+    // The streak counts consecutive IST days with a daily win. Several eras won on
+    // the same day count once, and practice games never touch it.
+    const { streak, lastWinDate } = player.stats;
+    const alreadyWonToday = lastWinDate === currentDate;
+    const continuesStreak = !lastWinDate || lastWinDate === shiftDate(currentDate, -1);
+    const nextStreak = mode !== "daily" || alreadyWonToday ? streak : won ? (continuesStreak ? streak + 1 : 1) : 0;
+
+    return {
       completedGames,
       stats: {
         played: player.stats.played + 1,
         wins: player.stats.wins + Number(won),
-        streak: won ? player.stats.streak + 1 : 0,
+        streak: nextStreak,
         bestScore: Math.max(player.stats.bestScore, score),
         points: player.stats.points + score,
         distribution,
+        lastWinDate: mode === "daily" && won ? currentDate : lastWinDate,
       },
-    });
+    };
+  }
+
+  function saveBoard(next: Board, update: Partial<PlayerData> = {}) {
+    if (!boardKey) {
+      setPracticeBoard(next);
+      if (Object.keys(update).length) savePlayer({ ...player, ...update });
+      return;
+    }
+    const oldestKept = shiftDate(currentDate, -(ARCHIVE_DAYS + 1));
+    const boards = Object.fromEntries(Object.entries(player.boards).filter(([key]) => key.slice(0, 10) >= oldestKept));
+    savePlayer({ ...player, ...update, boards: { ...boards, [boardKey]: next } });
   }
 
   function submit(event?: FormEvent, picked?: Movie) {
@@ -384,21 +456,14 @@ export default function GameExperience({ initialDate, focused = false }: { initi
       return;
     }
 
-    const nextGuesses = [...guesses, movie];
-    setGuesses(nextGuesses);
+    const next = { ...board, guessIds: [...board.guessIds, movie.id] };
+    const won = movie.id === answer.id;
+    const finished = won || next.guessIds.length >= config.maxGuesses;
     setQuery("");
     setHighlight(-1);
     setToast("");
-    if (movie.id === answer.id) {
-      const score = scoreFor(nextGuesses.length, revealedClueLabels.length);
-      setStatus("won");
-      setFinalScore(score);
-      recordResult(true, nextGuesses.length, score);
-    } else if (nextGuesses.length >= config.maxGuesses) {
-      setStatus("lost");
-      setFinalScore(0);
-      recordResult(false, nextGuesses.length, 0);
-    }
+    const score = won ? scoreFor(next.guessIds.length, revealedClueLabels.length) : 0;
+    saveBoard(next, finished ? resultUpdate(won, next.guessIds.length, score) : undefined);
   }
 
   function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -426,7 +491,7 @@ export default function GameExperience({ initialDate, focused = false }: { initi
       setToast("Your guesses already revealed every useful clue.");
       return;
     }
-    setRevealedClueLabels((current) => [...current, nextClue.label]);
+    saveBoard({ ...board, clueLabels: [...board.clueLabels, nextClue.label] });
     setToast(`${nextClue.label} revealed. −${config.cluePenalty} points.`);
   }
 
@@ -701,7 +766,7 @@ export default function GameExperience({ initialDate, focused = false }: { initi
                 ];
                 return <div className="guess-row" key={guess.id}><div className="guess-title"><span>Guess {row + 1}</span><strong>{guess.title}</strong></div><div className="cells">{cells.map((cell, index) => {
                   const result = getResult(cell.field, guess, answer);
-                  const resultLabel = result === "match" ? (cell.field === "year" ? answer.release : "Exact match") : result === "close" ? "Close" : "No match";
+                  const resultLabel = result === "match" ? (cell.field === "year" && answer.release !== "Regular" ? `${answer.release} release` : "Exact match") : result === "close" ? "Close" : "No match";
                   return <div className={`cell ${result}`} aria-label={`${cell.label}: ${cell.value}. ${resultLabel}. ${cell.sub}.`} style={{ animationDelay: `${index * 45}ms` }} key={cell.field}><small className="cell-label">{cell.label}</small><strong>{cell.value}</strong><small className="cell-result">{resultLabel}</small><small className="cell-note">{cell.sub}</small></div>;
                 })}</div></div>;
               })}</div>}
@@ -724,14 +789,14 @@ export default function GameExperience({ initialDate, focused = false }: { initi
         <div className="utility-grid">
           <section className="utility-card archive-card section-target" id="archive" tabIndex={-1}>
             <div className="utility-heading"><div><span>Previous shows</span><h3>Seven days on the reel</h3></div><small>Archive games do not affect your streak.</small></div>
-            <div className="archive-list">{Array.from({ length: 7 }).map((_, index) => {
+            <div className="archive-list">{Array.from({ length: ARCHIVE_DAYS }).map((_, index) => {
               const offset = index + 1;
               const completed = player.completedGames[gameHistoryKey(currentDate, offset, decade)];
               const isCurrent = mode === "archive" && archiveOffset === offset;
               const stateLabel = isCurrent
                 ? completed ? "Finished · current game" : "Playing now →"
                 : completed
-                  ? completed.result === "won" ? `Finished · ${completed.score.toLocaleString("en-IN")} pts` : "Finished · Try again"
+                  ? completed.result === "won" ? `Finished · ${completed.score.toLocaleString("en-IN")} pts` : "Finished · Missed"
                   : "Play →";
               return <button
                 key={offset}
@@ -748,7 +813,7 @@ export default function GameExperience({ initialDate, focused = false }: { initi
             <div className="stats-grid">
               <div><strong>{player.stats.played}</strong><span>Played</span></div>
               <div><strong>{player.stats.played ? Math.round(player.stats.wins / player.stats.played * 100) : 0}%</strong><span>Win rate</span></div>
-              <div><strong>{player.stats.streak}</strong><span>Streak</span></div>
+              <div><strong>{!player.stats.lastWinDate || player.stats.lastWinDate >= shiftDate(currentDate, -1) ? player.stats.streak : 0}</strong><span>Streak</span></div>
               <div><strong>{player.stats.bestScore.toLocaleString("en-IN")}</strong><span>Best score</span></div>
             </div>
           </section>

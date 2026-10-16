@@ -32,6 +32,12 @@ const MAX_CREDIT_CHECKS = 8;
 const TMDB_TIMEOUT_MS = 4500;
 const TMDB_POSTER_SIZE = "w185";
 const POSTER_CACHE_CONTROL = `public, max-age=${MONTH}, s-maxage=${MONTH}, stale-while-revalidate=86400`;
+// A fallback served because TMDB was slow or erroring must not stick for a month.
+const RETRY_CACHE_CONTROL = "public, max-age=300, s-maxage=300";
+
+// Thrown when TMDB could not give a definitive answer, so unstable_cache skips
+// storing the miss and the next request tries again.
+class TransientTmdbError extends Error {}
 
 const PERSON_ALIASES: Record<string, string[]> = {
   jrntr: ["ntramaraojr", "ntaramaoraojr"],
@@ -97,7 +103,11 @@ function posterTitleLines(title: string) {
   return [...lines.slice(0, 3), `${lines.slice(3).join(" ").slice(0, 17)}…`];
 }
 
-function fallbackPoster(movie: Movie) {
+function isTransientStatus(status: number) {
+  return status === 429 || status >= 500;
+}
+
+function fallbackPoster(movie: Movie, cacheControl = POSTER_CACHE_CONTROL) {
   const titleLines = posterTitleLines(movie.title);
   const longestTitleLine = Math.max(...titleLines.map((line) => line.length));
   const titleFontSize = Math.max(22, Math.min(36, Math.floor(300 / Math.max(1, longestTitleLine * .66))));
@@ -129,7 +139,7 @@ function fallbackPoster(movie: Movie) {
   return new NextResponse(svg, {
     headers: {
       "Content-Type": "image/svg+xml; charset=utf-8",
-      "Cache-Control": POSTER_CACHE_CONTROL,
+      "Cache-Control": cacheControl,
       "X-Poster-Source": "fallback",
     },
   });
@@ -140,6 +150,7 @@ async function searchTmdb(movie: Movie, token: string | undefined, apiKey: strin
   const titles = [...new Set([movie.title, ...(movie.aliases || []), titleWithoutSubtitle])].slice(0, 4);
   const results = new Map<number, TmdbMovie>();
   const creditRequests = new Map<number, Promise<TmdbCreditsResponse | undefined>>();
+  let transientFailure = false;
 
   function requestHeaders(): Record<string, string> {
     const headers: Record<string, string> = { Accept: "application/json" };
@@ -162,9 +173,13 @@ async function searchTmdb(movie: Movie, token: string | undefined, apiKey: strin
           next: { revalidate: MONTH },
           signal: AbortSignal.timeout(TMDB_TIMEOUT_MS),
         });
-        if (!response.ok) return undefined;
+        if (!response.ok) {
+          if (isTransientStatus(response.status)) transientFailure = true;
+          return undefined;
+        }
         return (await response.json()) as TmdbCreditsResponse;
       } catch {
+        transientFailure = true;
         return undefined;
       }
     })();
@@ -222,13 +237,17 @@ async function searchTmdb(movie: Movie, token: string | undefined, apiKey: strin
         signal: AbortSignal.timeout(TMDB_TIMEOUT_MS),
       });
 
-      if (!response.ok) return;
+      if (!response.ok) {
+        if (isTransientStatus(response.status)) transientFailure = true;
+        return;
+      }
       const data = (await response.json()) as TmdbSearchResponse;
       for (const result of data.results || []) {
         if (result.poster_path) results.set(result.id, result);
       }
     } catch {
       // One slow alias should not prevent other title variants from resolving.
+      transientFailure = true;
     }
   }
 
@@ -237,7 +256,9 @@ async function searchTmdb(movie: Movie, token: string | undefined, apiKey: strin
   if (yearMatched) return yearMatched;
 
   await Promise.all(titles.map((title) => search(title, false)));
-  return bestCastVerifiedResult();
+  const result = await bestCastVerifiedResult();
+  if (!result && transientFailure) throw new TransientTmdbError(`TMDB lookup incomplete for ${movie.id}`);
+  return result;
 }
 
 const resolveVerifiedPoster = unstable_cache(
@@ -251,7 +272,7 @@ const resolveVerifiedPoster = unstable_cache(
     if (!result?.poster_path) return null;
     return { path: result.poster_path, tmdbId: result.id };
   },
-  ["verified-poster-v4"],
+  ["verified-poster-v5"],
   { revalidate: MONTH },
 );
 
@@ -273,6 +294,6 @@ export async function GET(request: NextRequest) {
     response.headers.set("X-TMDB-Movie-Id", String(result.tmdbId));
     return response;
   } catch {
-    return fallbackPoster(movie);
+    return fallbackPoster(movie, RETRY_CACHE_CONTROL);
   }
 }

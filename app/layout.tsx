@@ -34,13 +34,13 @@ export const metadata: Metadata = {
     title: "Chitram — The Telugu Cinema Guessing Game",
     description: "One mystery Telugu film. Every guess and clue counts.",
     type: "website",
-    images: [{ url: "/og.png", width: 1730, height: 907, alt: "Chitram Telugu movie guessing game" }],
+    images: [{ url: "/og.jpg", width: 1200, height: 630, alt: "Chitram Telugu movie guessing game" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "Chitram — The Telugu Cinema Guessing Game",
     description: "One mystery Telugu film. Every guess and clue counts.",
-    images: ["/og.png"],
+    images: ["/og.jpg"],
   },
 };
 
