@@ -13,19 +13,22 @@
     "lint": "eslint .",
     "test:unit": "node --import tsx --test tests/*.test.ts",
     "test:catalog": "node --import tsx --test tests/catalog.test.ts",
+    "test:e2e": "playwright test",
     "test": "npm run lint && npm run test:unit && npm run build"
   },
   "dependencies": {
-    "next": "16.3.1",
+    "@vercel/analytics": "1.5.0",
+    "next": "16.3.8",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.3.1",
+    "eslint-config-next": "16.3.8",
     "tsx": "4.20.6",
     "typescript": "5.9.3"
   },
