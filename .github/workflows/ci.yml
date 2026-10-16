@@ -11,7 +11,8 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned so a GitHub image change never alters CI unannounced; bump deliberately.
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     env:
       DAILY_SECRET: ci-only-secret
