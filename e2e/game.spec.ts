@@ -75,6 +75,17 @@ test.describe("home page", () => {
     await expect(page.locator(".settings-summary")).toContainText("Practice");
     await expect(page.locator("#film-search")).toBeVisible();
   });
+
+  test("serves the TMDB credit logo from this site under a strict CSP", async ({ page, request }) => {
+    const response = await page.goto("/");
+    const csp = response!.headers()["content-security-policy"];
+    expect(csp).toContain("img-src 'self' data: blob: https://image.tmdb.org");
+    expect(csp).not.toContain("www.themoviedb.org");
+
+    const logo = await request.get("/tmdb-logo.svg");
+    expect(logo.status()).toBe(200);
+    expect(logo.headers()["content-type"]).toContain("image/svg+xml");
+  });
 });
 
 test.describe("shared results", () => {
