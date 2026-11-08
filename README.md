@@ -23,7 +23,7 @@ A premium Telugu cinema guessing game built with the Next.js App Router.
 
 ## Local development
 
-Requires Node.js 20.9 or newer.
+Requires Node.js 26.
 
 ```bash
 npm install
