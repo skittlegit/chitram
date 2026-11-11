@@ -1,10 +1,11 @@
 import { FormEvent, KeyboardEvent, RefObject, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ALL_MOVIES, GAME_RULES, type Movie } from "./game-data";
+import { ALL_MOVIES, clueCost, GAME_RULES, type Movie } from "./game-data";
 import {
   archiveLabel,
   displayedStreak,
   EMPTY_BOARD,
   eraLabel,
+  gameHref,
   evaluateBoard,
   exactMovie,
   gameHistoryKey,
@@ -15,15 +16,15 @@ import {
   puzzleNumber,
   scoreFor,
   searchMovies,
+  shiftDate,
   type Board,
   type Era,
+  type GameSelection,
   type Mode,
   type Verdict,
 } from "./game-logic";
 import { recordResult, updatePlayer, usePlayer, withBoard } from "./player-store";
 import { shareQuery, shareText, sharedResultFrom } from "./share";
-
-export type GameSelection = { decade?: Era; mode?: Mode; archiveOffset?: number };
 
 type PuzzleRequest = { date: string; offset: number; era: Era; board: Board };
 type RemoteVerdict = { key: string; historyKey: string; verdict: Verdict };
@@ -59,40 +60,30 @@ async function fetchVerdict({ date, offset, era, board }: PuzzleRequest): Promis
   return response.json();
 }
 
-// The caller owns the result card ref so the returned object holds no refs and
-// can be read freely during render.
-export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement | null>) {
-  const [currentDate, setCurrentDate] = useState(initialDate);
-  const [decade, setDecade] = useState<Era>("All");
-  const [mode, setMode] = useState<Mode>("daily");
-  const [archiveOffset, setArchiveOffset] = useState(0);
-  const [practiceIndex, setPracticeIndex] = useState(3);
-  const [practiceBoard, setPracticeBoard] = useState<Board>(EMPTY_BOARD);
-  const [remote, setRemote] = useState<RemoteVerdict | null>(null);
-  const [pending, setPending] = useState(false);
-  const [failedLoadKey, setFailedLoadKey] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [highlight, setHighlight] = useState(-1);
-  const [toast, setToast] = useState("");
-  const [undoMovie, setUndoMovie] = useState<Movie | null>(null);
-  const [pendingGame, setPendingGame] = useState<GameSelection | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const gameInProgressRef = useRef(false);
-  const player = usePlayer();
-  const hydrated = useHydrated();
+// Today's date in India, starting from the server's value and checked every
+// minute. While `holdRef.current` is true the date stays put.
+export function useToday(initialDate: string, holdRef?: RefObject<boolean>) {
+  const [today, setToday] = useState(initialDate);
 
   useEffect(() => {
-    const updateDate = () => {
-      // Never swap the puzzle out from under a player mid-game at midnight; the
-      // date catches up on the next tick after the game finishes.
-      if (gameInProgressRef.current) return;
-      const nextDate = indiaDateKey();
-      setCurrentDate((value) => (value === nextDate ? value : nextDate));
+    const update = () => {
+      if (holdRef?.current) return;
+      const next = indiaDateKey();
+      setToday((value) => (value === next ? value : next));
     };
-    updateDate();
-    const timer = window.setInterval(updateDate, 60000);
+    update();
+    const timer = window.setInterval(update, 60000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [holdRef]);
+
+  return today;
+}
+
+// The film vault plus the toast that confirms each change, shared by the game
+// and the home page. The game also uses the toast for its own messages.
+export function useVault(watchlist: string[]) {
+  const [toast, setToast] = useState("");
+  const [undoMovie, setUndoMovie] = useState<Movie | null>(null);
 
   useEffect(() => {
     if (!toast) return;
@@ -102,6 +93,53 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
     }, 4500);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  function toggleVault(movie: Movie) {
+    const exists = watchlist.includes(movie.id);
+    updatePlayer((current) => ({
+      ...current,
+      watchlist: exists ? current.watchlist.filter((id) => id !== movie.id) : [...current.watchlist, movie.id],
+    }));
+    setUndoMovie(exists ? movie : null);
+    setToast(exists ? "Removed from your vault." : "Saved to your film vault.");
+  }
+
+  function undoVaultRemoval() {
+    if (!undoMovie) return;
+    const movie = undoMovie;
+    updatePlayer((current) => (current.watchlist.includes(movie.id) ? current : { ...current, watchlist: [...current.watchlist, movie.id] }));
+    setToast(`${movie.title} restored.`);
+    setUndoMovie(null);
+  }
+
+  const savedMovies = watchlist.map((id) => MOVIE_BY_ID.get(id)).filter((movie): movie is Movie => Boolean(movie));
+  return { toast, setToast, undoMovie, toggleVault, undoVaultRemoval, savedMovies };
+}
+
+// The caller owns the result card ref so the returned object holds no refs and
+// can be read freely during render.
+export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement | null>, initialGame: GameSelection = {}) {
+  // Never swap the puzzle out from under a player mid-game at midnight; the
+  // date catches up on the next tick after the game finishes.
+  const gameInProgressRef = useRef(false);
+  const currentDate = useToday(initialDate, gameInProgressRef);
+  const [decade, setDecade] = useState<Era>(initialGame.decade ?? "All");
+  const [mode, setMode] = useState<Mode>(initialGame.mode ?? "daily");
+  const [archiveOffset, setArchiveOffset] = useState(initialGame.mode === "archive" ? initialGame.archiveOffset ?? 0 : 0);
+  // The practice film is never rendered while it is still hidden, so a random
+  // pick that differs between server and browser cannot break hydration.
+  const [practiceIndex, setPracticeIndex] = useState(() => Math.floor(Math.random() * ALL_MOVIES.length));
+  const [practiceBoard, setPracticeBoard] = useState<Board>(EMPTY_BOARD);
+  const [remote, setRemote] = useState<RemoteVerdict | null>(null);
+  const [pending, setPending] = useState(false);
+  const [failedLoadKey, setFailedLoadKey] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [highlight, setHighlight] = useState(-1);
+  const [pendingGame, setPendingGame] = useState<GameSelection | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const player = usePlayer();
+  const hydrated = useHydrated();
+  const { toast, setToast, undoMovie, toggleVault, undoVaultRemoval, savedMovies } = useVault(player.watchlist);
 
   const pool = moviesForEra(decade);
   const practiceAnswer = pool[practiceIndex % pool.length];
@@ -174,7 +212,10 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
     const nextMode = next.mode ?? mode;
     setDecade(nextDecade);
     setMode(nextMode);
-    setArchiveOffset(next.archiveOffset ?? (nextMode === "archive" ? archiveOffset : 0));
+    const nextArchiveOffset = next.archiveOffset ?? (nextMode === "archive" ? archiveOffset : 0);
+    setArchiveOffset(nextArchiveOffset);
+    // Keep the address in step so a refresh or a copied link reopens this game.
+    window.history.replaceState(null, "", gameHref(nextMode, nextDecade, shiftDate(currentDate, -nextArchiveOffset)));
     if (nextMode === "practice") setPracticeIndex(Math.floor(Math.random() * moviesForEra(nextDecade).length));
     resetBoard();
     setPendingGame(null);
@@ -281,25 +322,7 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
     }
     if (!canRevealClue) return;
     const result = await commitBoard({ ...board, clueLabels: [...board.clueLabels, nextClueLabel] });
-    if (result) setToast(`${nextClueLabel} revealed. −${GAME_RULES.cluePenalty} points.`);
-  }
-
-  function toggleVault(movie: Movie) {
-    const exists = player.watchlist.includes(movie.id);
-    updatePlayer((current) => ({
-      ...current,
-      watchlist: exists ? current.watchlist.filter((id) => id !== movie.id) : [...current.watchlist, movie.id],
-    }));
-    setUndoMovie(exists ? movie : null);
-    setToast(exists ? "Removed from your vault." : "Saved to your film vault.");
-  }
-
-  function undoVaultRemoval() {
-    if (!undoMovie) return;
-    const movie = undoMovie;
-    updatePlayer((current) => (current.watchlist.includes(movie.id) ? current : { ...current, watchlist: [...current.watchlist, movie.id] }));
-    setToast(`${movie.title} restored.`);
-    setUndoMovie(null);
+    if (result) setToast(`${nextClueLabel} revealed. −${clueCost(board.clueLabels.length)} points.`);
   }
 
   async function share() {
@@ -329,8 +352,7 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
     : mode === "archive" ? `Archive puzzle #${puzzle} · ${archiveLabel(currentDate, archiveOffset)}` : "Today's premiere";
   const gameSetupLabel = mode === "practice"
     ? `Practice · ${eraLabel(decade)}`
-    : mode === "archive" ? `Archive #${puzzle} · ${archiveLabel(currentDate, archiveOffset)} · ${eraLabel(decade)}` : `Daily · ${eraLabel(decade)}`;
-  const savedMovies = player.watchlist.map((id) => MOVIE_BY_ID.get(id)).filter((movie): movie is Movie => Boolean(movie));
+    : mode === "archive" ? `${archiveLabel(currentDate, archiveOffset)} · ${eraLabel(decade)}` : `Daily · ${eraLabel(decade)}`;
 
   return {
     // selection
@@ -339,6 +361,7 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
     mode,
     archiveOffset,
     puzzle,
+    todayPuzzle: puzzleNumber(currentDate),
     modeLabel,
     gameSetupLabel,
     settingsOpen,
@@ -370,6 +393,8 @@ export function useGame(initialDate: string, resultRef: RefObject<HTMLDivElement
     // clues
     visibleClues: verdict?.clues ?? [],
     hasNextClue: nextClueLabel !== null,
+    nextClueLabel,
+    nextClueCost: clueCost(board.clueLabels.length),
     cluesRemaining,
     canRevealClue,
     revealClue,

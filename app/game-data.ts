@@ -1,4 +1,5 @@
 import { CATALOG_ADDITIONS, type CatalogLane } from "./movie-catalog";
+import { MOVIE_MUSIC } from "./movie-music";
 import { bespokeStoryClueFor } from "./movie-story-clues";
 
 export type Decade = "2000s" | "2010s" | "2020s";
@@ -19,6 +20,8 @@ export type Movie = {
   storyClueSource?: "hand-authored" | "generated";
   lane?: CatalogLane;
   aliases?: string[];
+  // Song composer(s), joined with " & " like `hero`. Filled in from movie-music.ts.
+  music?: string;
 };
 
 export const DECADES: Decade[] = ["2000s", "2010s", "2020s"];
@@ -28,9 +31,16 @@ export const GAME_RULES = {
   maxGuesses: 8,
   baseScore: 1000,
   guessPenalty: 75,
-  cluePenalty: 100,
+  // Clues are sold weakest first, so they get dearer as they get more telling.
+  cluePenalties: [50, 100, 150],
   description: "Eight guesses and three optional clues. Every extra guess or clue lowers your score.",
 } as const;
+
+// What the next clue costs once `cluesUsed` have been bought.
+export function clueCost(cluesUsed: number) {
+  const costs = GAME_RULES.cluePenalties;
+  return costs[Math.min(Math.max(0, cluesUsed), costs.length - 1)];
+}
 
 // These are the hand-authored showcase records with bespoke story clues. The
 // complete playable catalogue is assembled with CATALOG_ADDITIONS below; use
@@ -122,7 +132,7 @@ function normalizeTitle(title: string) {
   return title.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-for (const [title, year, hero, director, genres, lane] of CATALOG_ADDITIONS) {
+for (const [title, year, hero, director, genres, lane, aliases] of CATALOG_ADDITIONS) {
   const key = `${normalizeTitle(title)}-${year}`;
   if (existingMovies.has(key)) continue;
   const bespokeStoryClue = bespokeStoryClueFor(title, year);
@@ -140,11 +150,15 @@ for (const [title, year, hero, director, genres, lane] of CATALOG_ADDITIONS) {
     storyClue: bespokeStoryClue ?? `A ${genres.toLowerCase().replace("/", " and ")} film in the ${lane.toLowerCase()} lane.`,
     storyClueSource: bespokeStoryClue ? "hand-authored" : "generated",
     lane,
+    ...(aliases ? { aliases: [...aliases] } : {}),
   });
   existingMovies.add(key);
 }
 
-for (const decade of DECADES) MOVIES[decade].sort((a, b) => a.year - b.year || a.title.localeCompare(b.title));
+for (const decade of DECADES) {
+  MOVIES[decade].sort((a, b) => a.year - b.year || a.title.localeCompare(b.title));
+  for (const movie of MOVIES[decade]) movie.music ??= MOVIE_MUSIC[`${movie.year}:${movie.title}`];
+}
 
 export function movieLane(movie: Movie): CatalogLane {
   if (movie.lane) return movie.lane;
@@ -155,6 +169,10 @@ export function movieLane(movie: Movie): CatalogLane {
 
 export function movieTitleWords(movie: Movie) {
   return movie.title.trim().split(/\s+/).length;
+}
+
+export function movieMusic(movie: Movie) {
+  return (movie.music ?? "").split(/\s*&\s*/).map((name) => name.trim()).filter(Boolean);
 }
 
 export function movieLeads(movie: Movie) {

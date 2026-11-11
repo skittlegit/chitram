@@ -20,7 +20,7 @@ describe("evaluateBoard", () => {
     const verdict = evaluateBoard(answer, { guessIds: [others[0].id, answer.id], clueLabels: ["Release year"] });
     assert.equal(verdict.status, "won");
     assert.equal(verdict.answer?.id, answer.id);
-    assert.equal(verdict.score, GAME_RULES.baseScore - GAME_RULES.guessPenalty - GAME_RULES.cluePenalty);
+    assert.equal(verdict.score, GAME_RULES.baseScore - GAME_RULES.guessPenalty - GAME_RULES.cluePenalties[0]);
     assert.deepEqual(verdict.clues.map((clue) => clue.label), ["Release year"]);
   });
 

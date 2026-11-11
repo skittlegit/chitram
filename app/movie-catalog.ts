@@ -7,6 +7,8 @@ export type MovieSeed = readonly [
   director: string,
   genres: string,
   lane: CatalogLane,
+  // Other names players search by: abbreviations and alternate spellings.
+  aliases?: readonly string[],
 ];
 
 // Mainstream Telugu releases from 2000 onward: major-star filmographies,
@@ -711,10 +713,9 @@ export const CATALOG_ADDITIONS: MovieSeed[] = [
   ["K-Ramp", 2025, "Kiran Abbavaram", "Jains Nani", "Romance/Comedy", "Breakout hit"],
   ["Subham", 2025, "Harshith Reddy", "Praveen Kandregula", "Horror/Comedy", "Breakout hit"],
   ["Single", 2025, "Sree Vishnu", "Caarthick Raju", "Romance/Comedy", "Breakout hit"],
-  ["Beauty", 2025, "Ankith Koyya", "JSS Vardhan", "Romance/Drama", "Breakout hit"],
   ["Dhandoraa", 2025, "Shivaji", "Murali Kanth", "Social/Drama", "Breakout hit"],
 
-  // Released Telugu films from 2026 (through August 18)
+  // Released Telugu films from 2026 (through November 6)
   ["The RajaSaab", 2026, "Prabhas", "Maruthi", "Horror/Comedy", "Star vehicle"],
   ["Mana Shankara Vara Prasad Garu", 2026, "Chiranjeevi & Venkatesh", "Anil Ravipudi", "Action/Comedy", "Star vehicle"],
   ["Bhartha Mahasayulaku Wignyapthi", 2026, "Ravi Teja", "Kishore Tirumala", "Comedy/Drama", "Star vehicle"],
@@ -724,25 +725,19 @@ export const CATALOG_ADDITIONS: MovieSeed[] = [
   ["Couple Friendly", 2026, "Santosh Sobhan", "Ashwin Chandrasekar", "Romance/Drama", "Breakout hit"],
   ["Hey Balwanth", 2026, "Suhas", "Gopi Atchara", "Comedy/Drama", "Breakout hit"],
   ["Vishnu Vinyasam", 2026, "Sree Vishnu", "Yadunaath Maruthi Rao", "Comedy/Drama", "Breakout hit"],
-  ["Mrithyunjay", 2026, "Sree Vishnu", "Hussain Sha Kiran", "Mystery/Thriller", "Breakout hit"],
   ["Ustaad Bhagat Singh", 2026, "Pawan Kalyan", "Harish Shankar", "Action/Drama", "Star vehicle"],
-  ["Suyodhana", 2026, "Priyadarshi", "Y. S. Madav Reddy", "Drama/Thriller", "Breakout hit"],
   ["Biker", 2026, "Sharwanand", "Abhilash Reddy", "Sports/Drama", "Star vehicle"],
-  ["Raakaasa", 2026, "Sangeeth Sobhan", "Manasa Sharma", "Comedy/Drama", "Breakout hit"],
   ["Dacoit: A Love Story", 2026, "Adivi Sesh", "Shaneil Deo", "Action/Romance", "Star vehicle"],
-  ["Bad Boy Karthik", 2026, "Naga Shaurya", "Ramesh Desina", "Action/Drama", "Star vehicle"],
-  ["Papam Prathap", 2026, "Thiruveer", "S. P. Durga Naresh", "Drama/Comedy", "Breakout hit"],
-  ["Gaayapadda Simham", 2026, "Tharun Bhascker", "Kasyap Sreenivas", "Comedy/Drama", "Breakout hit"],
-  ["Jetlee", 2026, "Satya", "Ritesh Rana", "Crime/Comedy", "Breakout hit"],
-  ["Sathi Leelavathi", 2026, "Lavanya Tripathi", "Tatineni Satya", "Drama/Thriller", "Breakout hit"],
   ["Peddi", 2026, "Ram Charan", "Buchi Babu Sana", "Sports/Drama", "Star vehicle"],
   ["Sing Geetham", 2026, "Ayaan", "Singeetam Srinivasa Rao", "Musical/Drama", "Breakout hit"],
   ["Maa Inti Bangaaram", 2026, "Samantha Ruth Prabhu", "Nandini Reddy", "Family/Drama", "Breakout hit"],
-  ["Nagabandham: The Secret Treasure", 2026, "Virat Karrna", "Abhishek Nama", "Adventure/Fantasy", "Breakout hit"],
   ["Rao Bahadur", 2026, "Satyadev", "Venkatesh Maha", "Period/Drama", "Cult favourite"],
   ["Lenin", 2026, "Akhil Akkineni", "Murali Kishor Abburu", "Action/Drama", "Breakout hit"],
-  ["Oh..! Sukumari", 2026, "Thiruveer", "Bharat Dharshan", "Comedy/Drama", "Breakout hit"],
   ["Chennai Love Story", 2026, "Kiran Abbavaram", "Ravi Namburii", "Romance/Drama", "Breakout hit"],
-  ["Srinivasa Mangapuram", 2026, "Jaya Krishna Ghattamaneni", "Ajay Bhupathi", "Romance/Drama", "Breakout hit"],
   ["Korean Kanakaraju", 2026, "Varun Tej", "Merlapaka Gandhi", "Comedy/Action", "Star vehicle"],
+  ["Irumudi", 2026, "Ravi Teja", "Shiva Nirvana", "Family/Drama", "Star vehicle"],
+  ["The Paradise", 2026, "Nani", "Srikanth Odela", "Period/Action", "Star vehicle"],
+  ["Ranabaali", 2026, "Vijay Deverakonda", "Rahul Sankrityan", "Period/Action", "Star vehicle"],
+  ["Aadarsha Kutumbam House No: 47", 2026, "Venkatesh", "Trivikram Srinivas", "Action/Comedy", "Star vehicle", ["AK47", "AK 47"]],
+  ["Cult", 2026, "Vishwak Sen", "Vishwak Sen", "Horror/Thriller", "Star vehicle"],
 ];

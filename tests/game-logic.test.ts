@@ -6,11 +6,13 @@ import {
   displayedStreak,
   emojiRow,
   gameHistoryKey,
+  gameHref,
   gameStatus,
   getResult,
   guessCells,
   normalize,
   nextStreak,
+  parseGameSelection,
   puzzleNumber,
   scoreFor,
   shiftDate,
@@ -101,6 +103,28 @@ describe("guess comparison", () => {
     assert.equal(getResult("words", movie({ title: "A B C D" }), answer), "miss");
   });
 
+  it("compares music directors, including shared credits", () => {
+    const target = movie({ id: "target", music: "Devi Sri Prasad" });
+    assert.equal(getResult("music", movie({ music: "Devi Sri Prasad" }), target), "match");
+    assert.equal(getResult("music", movie({ music: "Thaman S & Devi Sri Prasad" }), target), "close");
+    assert.equal(getResult("music", movie({ music: "Mani Sharma" }), target), "miss");
+    assert.equal(getResult("music", movie({ music: undefined }), target), "miss");
+    const cell = guessCells(movie({ music: "Thaman S & Devi Sri Prasad" }), target).find((item) => item.field === "music")!;
+    assert.equal(cell.note, "Shares Devi Sri Prasad");
+  });
+
+  it("says what a close result shares and which way the title length is off", () => {
+    const target = movie({ id: "target", title: "Two Words", hero: "Ram Charan", genres: ["Action", "Drama"] });
+    const cells = (overrides: Partial<Movie>) => Object.fromEntries(guessCells(movie(overrides), target).map((cell) => [cell.field, cell.note]));
+
+    assert.equal(cells({ hero: "Ram Charan & Jr NTR" }).hero, "Shares Ram Charan");
+    assert.equal(cells({ hero: "Allu Arjun" }).hero, "Same film family");
+    assert.equal(cells({ genres: ["Action", "Comedy"] }).genres, "Shares Action");
+    assert.equal(cells({ title: "One" }).words, "Answer is longer ↑");
+    assert.equal(cells({ title: "A Much Longer Title" }).words, "Answer is shorter ↓");
+    assert.equal(cells({ title: "Also Two" }).words, "Same length");
+  });
+
   it("points the year note toward the answer", () => {
     assert.equal(guessCells(movie({ year: 2005 }), answer)[0].note, "Answer is later ↑");
     assert.equal(guessCells(movie({ year: 2020 }), answer)[0].note, "Answer is earlier ↓");
@@ -116,7 +140,9 @@ describe("guess comparison", () => {
 describe("scoring and status", () => {
   it("charges extra guesses and clues, with a floor", () => {
     assert.equal(scoreFor(1, 0), GAME_RULES.baseScore);
-    assert.equal(scoreFor(3, 1), GAME_RULES.baseScore - 2 * GAME_RULES.guessPenalty - GAME_RULES.cluePenalty);
+    assert.equal(scoreFor(3, 1), GAME_RULES.baseScore - 2 * GAME_RULES.guessPenalty - 50);
+    assert.equal(scoreFor(1, 2), GAME_RULES.baseScore - 150);
+    assert.equal(scoreFor(1, 3), GAME_RULES.baseScore - 300);
     assert.equal(scoreFor(8, 3), 175);
     assert.equal(scoreFor(20, 20), 100);
   });
@@ -173,5 +199,31 @@ describe("search normalisation", () => {
   it("folds common Telugu transliteration variants", () => {
     assert.equal(normalize("Seetha Ramam"), normalize("Sitha Ramam"));
     assert.equal(normalize("Bahubali"), normalize("Baahubali"));
+  });
+});
+
+describe("game links", () => {
+  const today = "2026-11-10";
+
+  it("opens today's daily game by default", () => {
+    assert.equal(gameHref("daily"), "/game");
+    assert.deepEqual(parseGameSelection({}, today), { decade: "All", mode: "daily", archiveOffset: 0 });
+  });
+
+  it("round-trips practice, era and archive selections", () => {
+    assert.equal(gameHref("practice", "2010s"), "/game?mode=practice&era=2010s");
+    assert.deepEqual(parseGameSelection({ mode: "practice", era: "2010s" }, today), { decade: "2010s", mode: "practice", archiveOffset: 0 });
+
+    assert.equal(gameHref("archive", "All", "2026-11-07"), "/game?day=2026-11-07");
+    assert.deepEqual(parseGameSelection({ day: "2026-11-07" }, today), { decade: "All", mode: "archive", archiveOffset: 3 });
+  });
+
+  it("falls back to today for days outside the archive or bad input", () => {
+    const daily = { decade: "All", mode: "daily", archiveOffset: 0 };
+    assert.deepEqual(parseGameSelection({ day: today }, today), daily);
+    assert.deepEqual(parseGameSelection({ day: "2026-11-11" }, today), daily);
+    assert.deepEqual(parseGameSelection({ day: "2026-11-02" }, today), daily);
+    assert.deepEqual(parseGameSelection({ day: "yesterday", era: "1990s", mode: "hard" }, today), daily);
+    assert.deepEqual(parseGameSelection({ day: ["2026-11-07", "2026-11-08"] }, today), daily);
   });
 });

@@ -8,7 +8,6 @@ export default function GameLoading() {
       </header>
 
       <section className="play-stage play-loading-stage">
-        <div className="play-loading-options" />
         <div className="play-loading-title">
           <div><i /><strong /></div>
           <span />

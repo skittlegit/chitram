@@ -1,19 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { GAME_RULES } from "./game-data";
-import { ERAS } from "./game-logic";
-import { GameLoading, GameToast, MoviePoster, StatsPanel } from "./game-ui";
+import { ARCHIVE_DAYS, archiveLabel, ERAS, gameHistoryKey, type GameSelection } from "./game-logic";
+import { cellHint, GameLoading, GameToast, MoviePoster, NextMovieCountdown, StatsPanel } from "./game-ui";
 import { useGame } from "./use-game";
 
-const GRID_COLUMNS = ["Year", "Lead", "Director", "Genre", "Movie type", "Title length"];
-const EMPTY_SIGNALS = ["Year", "Lead", "Director", "Genre", "Type", "Words"];
+const GRID_COLUMNS = ["Year", "Lead", "Director", "Genre", "Music", "Title length"];
+const EMPTY_SIGNALS = ["Year", "Lead", "Director", "Genre", "Music", "Words"];
 
-export default function FocusedGame({ initialDate }: { initialDate: string }) {
+export default function FocusedGame({ initialDate, initialGame }: { initialDate: string; initialGame?: GameSelection }) {
   const resultRef = useRef<HTMLDivElement>(null);
-  const game = useGame(initialDate, resultRef);
-  const { answer, guesses, status, mode, decade, settingsOpen } = game;
+  const game = useGame(initialDate, resultRef, initialGame);
+  const { answer, guesses, status, mode, decade, settingsOpen, currentDate, archiveOffset } = game;
+  const highlighted = game.highlight >= 0 ? game.suggestions[game.highlight] : undefined;
+
+  // An actor or director search can list many films, so keep the arrow-key choice in view.
+  useEffect(() => {
+    if (highlighted) document.getElementById(`focused-film-option-${highlighted.id}`)?.scrollIntoView({ block: "nearest" });
+  }, [highlighted]);
 
   return (
     <main className="play-page" id="top">
@@ -23,17 +29,14 @@ export default function FocusedGame({ initialDate }: { initialDate: string }) {
       <header className="topbar">
         <div className="topbar-inner">
           <Link className="brand wordmark" href="/" aria-label="Chitram home">Chitram</Link>
+          <button className="play-settings-trigger" type="button" aria-controls="focused-game-settings" aria-expanded={settingsOpen} onClick={() => game.setSettingsOpen((value) => !value)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" /></svg>
+            <span>{settingsOpen ? "Close options" : game.gameSetupLabel}</span>
+          </button>
         </div>
       </header>
 
       <section className="play-stage section-target" id="game" tabIndex={-1}>
-        <div className="play-gamebar">
-          <button className="play-settings-trigger" type="button" aria-controls="focused-game-settings" aria-expanded={settingsOpen} onClick={() => game.setSettingsOpen((value) => !value)}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" /></svg>
-            <span>{settingsOpen ? "Close game options" : game.gameSetupLabel}</span>
-          </button>
-        </div>
-
         {game.pendingGame && (
           <div className="play-restart" role="alert">
             <div><strong>Switch games?</strong><span>Your current guesses will be cleared.</span></div>
@@ -60,12 +63,28 @@ export default function FocusedGame({ initialDate }: { initialDate: string }) {
               ))}
             </div>
           </fieldset>
+          <fieldset className="play-archive">
+            <legend>Previous days</legend>
+            <div className="play-option-row days">
+              {Array.from({ length: ARCHIVE_DAYS }, (_, index) => {
+                const offset = index + 1;
+                const finished = game.player.completedGames[gameHistoryKey(currentDate, offset, decade)];
+                const isCurrent = mode === "archive" && archiveOffset === offset;
+                const state = finished ? (finished.result === "won" ? `${finished.score.toLocaleString("en-IN")} pts` : "Missed") : `#${game.todayPuzzle - offset}`;
+                return (
+                  <button type="button" key={offset} aria-pressed={isCurrent} className={`${isCurrent ? "active" : ""} ${finished ? "finished" : ""}`.trim()} onClick={() => game.startGame({ mode: "archive", archiveOffset: offset })}>
+                    <strong>{archiveLabel(currentDate, offset)}</strong><small>{state}</small>
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
         </div>
 
         <div className="play-titlebar">
           <div>
-            <span className="play-kicker"><b lang="te">తెలుగు సినిమా</b> / {game.modeLabel}</span>
-            <h1>Name the movie.</h1>
+            <span className="play-kicker"><b lang="te">తెలుగు సినిమా</b><i aria-hidden="true">/</i><span>{game.modeLabel}</span></span>
+            <h1>{status === "won" ? "That's a wrap." : status === "lost" ? "Roll the credits." : "Name the movie."}</h1>
           </div>
           <div className="play-score">
             <span>{status === "playing" ? "Score" : "Final"}</span>
@@ -114,7 +133,7 @@ export default function FocusedGame({ initialDate }: { initialDate: string }) {
                 {game.suggestions.map((movie, index) => (
                   <button type="button" role="option" id={`focused-film-option-${movie.id}`} aria-selected={index === game.highlight} tabIndex={-1} className={index === game.highlight ? "highlight" : ""} key={movie.id} onMouseDown={(event) => event.preventDefault()} onClick={() => game.submit(undefined, movie)}>
                     <MoviePoster movie={movie} className="play-suggestion-poster" />
-                    <span><strong>{movie.title}</strong><small>{movie.director}</small></span>
+                    <span><strong>{movie.title}</strong><small>{movie.hero} · {movie.director}</small></span>
                     <em>{movie.year}</em>
                   </button>
                 ))}
@@ -129,7 +148,7 @@ export default function FocusedGame({ initialDate }: { initialDate: string }) {
             <div className="play-result-actions">
               <button type="button" onClick={game.share}>Share result</button>
               <button type="button" className="secondary" onClick={() => game.toggleVault(answer)}>{game.player.watchlist.includes(answer.id) ? "Saved" : "Save movie"}</button>
-              {mode === "practice" && <button type="button" className="secondary" onClick={() => game.startGame({ mode: "practice" }, true)}>Next movie</button>}
+              <button type="button" className="secondary" onClick={() => game.startGame({ mode: "practice" }, true)}>{mode === "practice" ? "Next movie" : "Play a practice film"}</button>
             </div>
           </div>
         )}
@@ -146,6 +165,7 @@ export default function FocusedGame({ initialDate }: { initialDate: string }) {
               </div>
             ) : (
               <div className="play-guess-list">
+                {/* Newest first, so the row you just played lands right under the search box. */}
                 {guesses.map((guess, row) => (
                   <article className="play-guess" key={guess.id}>
                     <div className="play-guess-title"><span>{String(row + 1).padStart(2, "0")}</span><strong>{guess.title}</strong></div>
@@ -154,22 +174,22 @@ export default function FocusedGame({ initialDate }: { initialDate: string }) {
                         <div className={`play-cell ${cell.result}`} aria-label={`${cell.label}: ${cell.value}. ${cell.resultLabel}. ${cell.note}.`} style={{ animationDelay: `${index * 45}ms` }} key={cell.field}>
                           <small className="play-cell-label">{cell.label}</small>
                           <strong>{cell.value}</strong>
-                          <small>{cell.result === "match" ? "Exact" : cell.result === "close" ? "Close" : cell.note}</small>
+                          <small>{cellHint(cell)}</small>
                         </div>
                       ))}
                     </div>
                   </article>
-                ))}
+                )).reverse()}
               </div>
             )}
           </section>
 
           <aside className="play-tools" aria-label="Game tools">
             <div className="play-panel-heading compact"><div><span>Need a nudge?</span><h2>Clues</h2></div><strong>{game.cluesRemaining}<small> left</small></strong></div>
-            <button className="play-clue-button" type="button" onClick={game.revealClue} disabled={!game.canRevealClue}>
+            <button className="play-clue-button" type="button" onClick={game.revealClue} disabled={!game.canRevealClue} hidden={status !== "playing"}>
               <span>
-                <strong>{game.cluesRemaining === 0 ? "All clues used" : !game.hasNextClue ? "Nothing new to reveal" : "Reveal next clue"}</strong>
-                <small>{game.cluesRemaining === 0 ? "Keep guessing" : !game.hasNextClue ? "Your guesses covered them" : `Costs ${GAME_RULES.cluePenalty} points`}</small>
+                <strong>{game.cluesRemaining === 0 ? "All clues used" : !game.hasNextClue ? "Nothing new to reveal" : `Next clue: ${game.nextClueLabel}`}</strong>
+                <small>{game.cluesRemaining === 0 ? "Keep guessing" : !game.hasNextClue ? "Your guesses covered them" : `Reveal for ${game.nextClueCost} points`}</small>
               </span>
               <b aria-hidden="true">?</b>
             </button>
@@ -178,12 +198,15 @@ export default function FocusedGame({ initialDate }: { initialDate: string }) {
                 ? game.visibleClues.map((clue, index) => <article key={clue.label}><span>Clue {index + 1} · {clue.label}</span><strong>{clue.value}</strong></article>)
                 : <div className="play-no-clues"><span>?</span><strong>No clues used</strong><small>You can solve it clean for the full score.</small></div>}
             </div>
-            <div className="play-penalties"><span>Scoring</span><p><strong>−{GAME_RULES.guessPenalty}</strong> each extra guess</p><p><strong>−{GAME_RULES.cluePenalty}</strong> each clue</p></div>
+            <div className="play-penalties"><span>Scoring</span><p><strong>−{GAME_RULES.guessPenalty}</strong> each extra guess</p><p><strong>−{GAME_RULES.cluePenalties.join(" / ")}</strong> clues</p></div>
           </aside>
         </div>
         {status !== "playing" && (
           <section className="play-stats" aria-labelledby="play-stats-title">
-            <h2 id="play-stats-title">Your box office</h2>
+            <div className="play-stats-heading">
+              <h2 id="play-stats-title">Your box office</h2>
+              {mode === "daily" && <p>Next film in <NextMovieCountdown /></p>}
+            </div>
             <StatsPanel stats={game.player.stats} streak={game.streak} highlight={status === "won" ? guesses.length : undefined} />
           </section>
         )}

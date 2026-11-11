@@ -5,19 +5,20 @@ A premium Telugu cinema guessing game built with the Next.js App Router.
 ## Game features
 
 - One clear ruleset for every player: start at 1,000 points with eight guesses and up to three optional clues.
-- Every guess after the first costs 75 points and every requested clue costs 100 points.
+- Every guess after the first costs 75 points. Clues are sold weakest first and cost 50, then 100, then 150 points.
 - Requested clues cost points and skip information already confirmed by an exact match.
-- Daily challenge, unlimited practice, and a seven-day archive.
+- Daily challenge, unlimited practice, and a seven-day archive, all played on one game screen. Each game has its own link (`/game`, `/game?mode=practice`, `/game?day=2026-11-07`, plus `&era=2010s`), so a refresh or a shared link reopens the same game.
+- The home page is a landing page with no game on it: it shows whether today's film is unplayed, in progress, or solved, and holds the rules, archive, stats, and saved films.
 - Play by decade or use All for the complete 2000s–2020s catalogue.
-- Automatic, colour-coded year, lead and film-family, director, genre, film-lane, and title-size clues after every guess.
+- Automatic, colour-coded year, lead and film-family, director, genre, music-director, and title-size clues after every guess. A close result says what the two films share.
 - The daily answer is chosen and scored on the server, so it never ships to the browser; progress resumes after a refresh.
-- Typo-tolerant search that folds common Telugu romanisations (Pokkiri/Pokiri, Seetha/Sitha).
+- Typo-tolerant search that folds common Telugu romanisations (Pokkiri/Pokiri, Seetha/Sitha), and also finds films by lead actor or director.
 - Device-local streaks, win rate, points, best score, and a wins-by-guesses chart.
 - Share results through the phone share sheet, with a link preview image of your grid.
 - A device-local film vault for saving revealed movies.
 - Cast-verified TMDB poster art in search results, film reveals, and the vault, with a built-in fallback when no verified poster is available.
-- 736 Telugu films from 2000 through 2026, with strong filmography coverage for 20 established mainstream leads plus a curated set of recognisable breakout hits and cult favourites.
-- 553 static, spoiler-light story clues written for individual movies (75% of the reel), including every 2026 release in the catalogue.
+- 729 Telugu films from 2000 through 2026, with strong filmography coverage for 20 established mainstream leads plus a curated set of recognisable breakout hits and cult favourites.
+- 546 static, spoiler-light story clues written for individual movies (75% of the reel), including every 2026 release in the catalogue.
 - Every movie has a deterministic branded poster fallback, with real poster art resolved automatically when a TMDB token or API key is configured.
 - Branded loading, error, and not-found pages plus installable web-app metadata.
 
@@ -46,14 +47,15 @@ To enable real poster art, copy `.env.example` to `.env.local` and add a TMDB AP
 
 ## Code layout
 
-- `app/game-data.ts`, `app/movie-catalog.ts`, `app/movie-story-clues.ts`: the film catalogue.
+- `app/game-data.ts`, `app/movie-catalog.ts`, `app/movie-story-clues.ts`, `app/movie-music.ts`: the film catalogue, its story clues, and each film's music director.
 - `app/game-logic.ts`: pure game rules (search, guess comparison, board scoring, streaks).
 - `app/daily-answer.ts`: the secret-keyed daily pick. Server code only; never import it from a client component.
 - `app/api/puzzle/route.ts`: scores daily and archive boards without revealing the answer early.
 - `app/share.ts`, `app/s/`: share links, the shared-result page, and its preview image.
 - `app/player-store.ts`: device-local stats, saved boards, and the film vault.
-- `app/use-game.ts`: the game state and actions shared by both views.
-- `app/home-experience.tsx` (`/`) and `app/focused-game.tsx` (`/game`): the two page views.
+- `app/use-game.ts`: the game state and actions, plus the small hooks the home page shares (today's date, the film vault).
+- `app/focused-game.tsx` (`/game`): the game. `app/game/page.tsx` turns the query string into the game to open.
+- `app/home-experience.tsx` (`/`): the landing page, with the archive, stats, and saved films. It links into `/game` and holds no game of its own.
 
 ## Deploy on Vercel
 

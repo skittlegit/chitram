@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import type { Movie } from "./game-data";
-import { nextPuzzleCountdown } from "./game-logic";
+import { nextPuzzleCountdown, type GuessCell } from "./game-logic";
 import type { PlayerStats } from "./player-store";
 import type { Game } from "./use-game";
 
@@ -99,7 +99,23 @@ export function StatsPanel({ stats, streak, highlight }: { stats: PlayerStats; s
   );
 }
 
-export function GameToast({ game, className = "global-toast" }: { game: Game; className?: string }) {
+// The one line under a cell's value. Every outcome is named, so the board never
+// relies on colour alone. A wrong year or title length says which way to go, and
+// a close lead or genre says what the two films share.
+export function cellHint(cell: GuessCell) {
+  if (cell.result === "match") return cell.resultLabel === "Exact match" ? "Exact" : cell.resultLabel;
+  if (cell.field === "year" || cell.field === "words") {
+    const up = cell.note.includes("↑");
+    const direction = cell.field === "year" ? (up ? "Later ↑" : "Earlier ↓") : up ? "Longer ↑" : "Shorter ↓";
+    return cell.result === "close" ? `Close · ${direction.toLowerCase()}` : direction;
+  }
+  if (cell.result === "close") return cell.field === "hero" || cell.field === "genres" || cell.field === "music" ? cell.note : "Close";
+  return "Miss";
+}
+
+type ToastSource = Pick<Game, "toast" | "undoMovie" | "undoVaultRemoval">;
+
+export function GameToast({ game, className = "global-toast" }: { game: ToastSource; className?: string }) {
   if (!game.toast) return null;
   return (
     <div className={className} role="status" aria-live="polite">

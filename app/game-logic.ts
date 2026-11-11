@@ -1,4 +1,4 @@
-import { ALL_MOVIES, DECADES, GAME_RULES, MOVIES, movieFamilies, movieLane, movieLeads, movieTitleWords, type Decade, type Movie } from "./game-data";
+import { ALL_MOVIES, clueCost, DECADES, GAME_RULES, MOVIES, movieFamilies, movieLeads, movieMusic, movieTitleWords, type Decade, type Movie } from "./game-data";
 
 // Pure game rules shared by the client views, the puzzle API and the unit tests.
 // Nothing here touches React, the DOM, or storage. The daily answer itself is
@@ -7,13 +7,13 @@ import { ALL_MOVIES, DECADES, GAME_RULES, MOVIES, movieFamilies, movieLane, movi
 export type Mode = "daily" | "practice" | "archive";
 export type Result = "match" | "close" | "miss";
 export type Era = Decade | "All";
-export type ClueField = "year" | "hero" | "director" | "genres" | "lane" | "words";
+export type ClueField = "year" | "hero" | "director" | "genres" | "music" | "words";
 export type GameStatus = "playing" | "won" | "lost";
 export type Board = { guessIds: string[]; clueLabels: string[] };
 export type Clue = { label: string; value: string; field?: ClueField };
 
 export const ERAS: Era[] = ["All", ...DECADES];
-export const CLUE_FIELDS: ClueField[] = ["year", "hero", "director", "genres", "lane", "words"];
+export const CLUE_FIELDS: ClueField[] = ["year", "hero", "director", "genres", "music", "words"];
 export const ARCHIVE_DAYS = 7;
 export const MOVIE_BY_ID = new Map(ALL_MOVIES.map((movie) => [movie.id, movie]));
 export const EMPTY_BOARD: Board = { guessIds: [], clueLabels: [] };
@@ -47,6 +47,37 @@ export function archiveLabel(date: string, offset: number) {
 
 export function gameHistoryKey(date: string, offset: number, era: Era) {
   return `${shiftDate(date, -offset)}:${era}`;
+}
+
+// ---------------------------------------------------------------------------
+// Which game is on screen. /game reads it from its query string, so the home
+// page, the archive and a refresh can all point at one particular game.
+
+export type GameSelection = { decade?: Era; mode?: Mode; archiveOffset?: number };
+type QueryParams = Record<string, string | string[] | undefined>;
+
+// `day` is the puzzle's own date, so an archive link keeps meaning the same
+// puzzle tomorrow; daily games carry no date and always mean "today".
+export function gameHref(mode: Mode, era: Era = "All", day?: string) {
+  const params = new URLSearchParams();
+  if (mode === "practice") params.set("mode", "practice");
+  if (mode === "archive" && day) params.set("day", day);
+  if (era !== "All") params.set("era", era);
+  const query = params.toString();
+  return query ? `/game?${query}` : "/game";
+}
+
+// Anything unrecognised, not yet released, or older than the archive falls back
+// to today's daily game.
+export function parseGameSelection(params: QueryParams, today: string): Required<GameSelection> {
+  const decade = isEra(params.era) ? params.era : "All";
+  if (params.mode === "practice") return { decade, mode: "practice", archiveOffset: 0 };
+  const day = params.day;
+  if (typeof day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    const archiveOffset = puzzleNumber(today) - puzzleNumber(day);
+    if (archiveOffset >= 1 && archiveOffset <= ARCHIVE_DAYS) return { decade, mode: "archive", archiveOffset };
+  }
+  return { decade, mode: "daily", archiveOffset: 0 };
 }
 
 export function moviesForEra(era: Era) {
@@ -115,16 +146,45 @@ export function matchScore(movie: Movie, normalizedQuery: string) {
   return best;
 }
 
-export function searchMovies(pool: Movie[], query: string, excludeIds: string[] = [], limit = 3) {
+// True when the query is the start of a lead's or the director's name, or of
+// any word in it: "mahesh", "rajamouli" and "ss raja" all count. Three letters
+// only count as a whole word ("ntr", "ram"), which keeps short queries quiet.
+export function matchesPerson(movie: Movie, normalizedQuery: string) {
+  if (normalizedQuery.length < 3) return false;
+  return [...movieLeads(movie), movie.director].some((name) => {
+    const words = name.split(/[\s.]+/).filter(Boolean);
+    if (normalizedQuery.length === 3) return words.some((word) => normalize(word) === normalizedQuery);
+    return words.some((_, index) => normalize(words.slice(index).join("")).startsWith(normalizedQuery));
+  });
+}
+
+export const PERSON_RESULTS = 40;
+
+// Real title matches come first, best first; among equally good ones the
+// shortest title wins, since it is closest to what has been typed, then the
+// newest film. If the query is also an actor's or director's name, their films
+// follow, newest first, so a player who remembers the star but not the title
+// can browse. Near-miss spellings only fill whatever room is left.
+export function searchMovies(pool: Movie[], query: string, excludeIds: string[] = [], limit = 5) {
   const normalizedQuery = normalize(query);
   if (!normalizedQuery) return [];
-  return pool
+  const scored = pool
     .filter((movie) => !excludeIds.includes(movie.id))
-    .map((movie) => ({ movie, score: matchScore(movie, normalizedQuery) }))
-    .filter(({ score }) => score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
+    .map((movie) => ({ movie, score: matchScore(movie, normalizedQuery) }));
+  const ranked = (minimum: number, maximum: number) => scored
+    .filter(({ score }) => score >= minimum && score <= maximum)
+    .sort((a, b) => b.score - a.score || normalize(a.movie.title).length - normalize(b.movie.title).length || b.movie.year - a.movie.year)
     .map(({ movie }) => movie);
+
+  const byTitle = ranked(2, 4).slice(0, limit);
+  const byPerson = scored
+    .map(({ movie }) => movie)
+    .filter((movie) => !byTitle.includes(movie) && matchesPerson(movie, normalizedQuery))
+    .sort((a, b) => b.year - a.year || a.title.localeCompare(b.title))
+    .slice(0, PERSON_RESULTS);
+  const found = [...byTitle, ...byPerson];
+  const nearMisses = ranked(1, 1).filter((movie) => !found.includes(movie)).slice(0, Math.max(0, limit - found.length));
+  return [...found, ...nearMisses];
 }
 
 export function exactMovie(pool: Movie[], query: string) {
@@ -152,7 +212,13 @@ export function getResult(field: ClueField, guess: Movie, answer: Movie): Result
     if (guess.genres.length === answer.genres.length && guess.genres.every((genre) => answer.genres.includes(genre))) return "match";
     return guess.genres.some((genre) => answer.genres.includes(genre)) ? "close" : "miss";
   }
-  if (field === "lane") return movieLane(guess) === movieLane(answer) ? "match" : "miss";
+  if (field === "music") {
+    const guessMusic = movieMusic(guess);
+    const answerMusic = movieMusic(answer);
+    if (!guessMusic.length || !answerMusic.length) return "miss";
+    if (guessMusic.length === answerMusic.length && guessMusic.every((name) => answerMusic.includes(name))) return "match";
+    return guessMusic.some((name) => answerMusic.includes(name)) ? "close" : "miss";
+  }
   const difference = Math.abs(movieTitleWords(guess) - movieTitleWords(answer));
   return difference === 0 ? "match" : difference === 1 ? "close" : "miss";
 }
@@ -171,15 +237,22 @@ export type GuessCell = {
   resultLabel: string;
 };
 
+// A "close" result always says what was close: which lead or genre the two films
+// share, or which way the year and the title length are off.
 export function guessCells(guess: Movie, answer: Movie): GuessCell[] {
   const result = (field: ClueField) => getResult(field, guess, answer);
+  const answerLeads = movieLeads(answer);
+  const sharedLeads = movieLeads(guess).filter((lead) => answerLeads.includes(lead));
+  const sharedGenres = guess.genres.filter((genre) => answer.genres.includes(genre));
+  const wordGap = movieTitleWords(answer) - movieTitleWords(guess);
+  const sharedMusic = movieMusic(guess).filter((name) => movieMusic(answer).includes(name));
   const cells: Omit<GuessCell, "result" | "resultLabel">[] = [
     { field: "year", label: "Year", value: String(guess.year), note: guess.year === answer.year ? "Same year" : guess.year < answer.year ? "Answer is later ↑" : "Answer is earlier ↓" },
-    { field: "hero", label: "Lead", value: guess.hero, note: result("hero") === "close" ? "Related film family" : "Lead actor" },
+    { field: "hero", label: "Lead", value: guess.hero, note: result("hero") !== "close" ? "Lead actor" : sharedLeads.length ? `Shares ${sharedLeads.join(" & ")}` : "Same film family" },
     { field: "director", label: "Director", value: guess.director, note: "Filmmaker" },
-    { field: "genres", label: "Genre", value: guess.genres.join(" / "), note: result("genres") === "close" ? "Some overlap" : "Genre" },
-    { field: "lane", label: "Movie type", value: movieLane(guess), note: "Release lane" },
-    { field: "words", label: "Title length", value: titleLengthLabel(guess), note: result("words") === "close" ? "Off by one" : "Word count" },
+    { field: "genres", label: "Genre", value: guess.genres.join(" / "), note: result("genres") === "close" ? `Shares ${sharedGenres.join(" & ")}` : "Genre" },
+    { field: "music", label: "Music", value: guess.music ?? "Unknown", note: result("music") === "close" ? `Shares ${sharedMusic.join(" & ")}` : "Music director" },
+    { field: "words", label: "Title length", value: titleLengthLabel(guess), note: wordGap === 0 ? "Same length" : wordGap > 0 ? "Answer is longer ↑" : "Answer is shorter ↓" },
   ];
 
   return cells.map((cell) => {
@@ -196,7 +269,9 @@ export function emojiRow(results: Result[]) {
 }
 
 export function scoreFor(guesses: number, cluesUsed: number) {
-  return Math.max(100, GAME_RULES.baseScore - Math.max(0, guesses - 1) * GAME_RULES.guessPenalty - cluesUsed * GAME_RULES.cluePenalty);
+  let cluePoints = 0;
+  for (let index = 0; index < cluesUsed; index += 1) cluePoints += clueCost(index);
+  return Math.max(100, GAME_RULES.baseScore - Math.max(0, guesses - 1) * GAME_RULES.guessPenalty - cluePoints);
 }
 
 export function gameStatus(guesses: Movie[], answer: Movie): GameStatus {
@@ -212,9 +287,9 @@ export function cluesFor(answer: Movie): Clue[] {
     { label: "Release year", value: String(answer.year), field: "year" },
     { label: "Genre signal", value: answer.genres.join(" / "), field: "genres" },
     ...(answer.storyClueSource === "generated" ? [] : [{ label: "Story beat", value: answer.storyClue }]),
+    ...(answer.music ? [{ label: "Music director", value: answer.music, field: "music" as const }] : []),
     { label: "The filmmaker", value: answer.director, field: "director" },
     { label: "Lead billing", value: answer.hero, field: "hero" },
-    { label: "Movie type", value: movieLane(answer), field: "lane" },
     { label: "Title length", value: titleLengthLabel(answer), field: "words" },
   ];
 }

@@ -46,4 +46,24 @@ describe("search", () => {
     assert.equal(exactMovie(ALL_MOVIES, "AVPL")?.title, "Ala Vaikunthapurramuloo");
     assert.equal(exactMovie(ALL_MOVIES, "Pokir"), undefined);
   });
+
+  it("finds films by lead actor or director, newest first, after any title matches", () => {
+    const sukumar = searchMovies(ALL_MOVIES, "sukumar");
+    assert.ok(sukumar.length >= 5);
+    assert.ok(sukumar.every((movie) => movie.director === "Sukumar"));
+    assert.deepEqual(sukumar.map((movie) => movie.year), sukumar.map((movie) => movie.year).sort((a, b) => b - a));
+
+    assert.ok(searchMovies(ALL_MOVIES, "mahesh babu").filter((movie) => movie.hero === "Mahesh Babu").length >= 20);
+    assert.ok(searchMovies(ALL_MOVIES, "rajamouli").some((movie) => movie.title === "Eega"));
+    // A title match still leads, and two letters are too few to search people.
+    assert.equal(searchMovies(ALL_MOVIES, "arya")[0].title, "Arya");
+    assert.ok(searchMovies(ALL_MOVIES, "na").length <= 5);
+  });
+
+  it("offers five title suggestions and puts the shortest matching title first", () => {
+    const results = searchMovies(ALL_MOVIES, "nuvv");
+    assert.equal(results.length, 5);
+    const lengths = results.map((movie) => normalize(movie.title).length);
+    assert.deepEqual(lengths, [...lengths].sort((a, b) => a - b));
+  });
 });
